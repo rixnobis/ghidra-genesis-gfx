@@ -1,0 +1,7 @@
+.gradle/
+build/
+dist/
+bin/
+lib/
+*.class
+__pycache__/
