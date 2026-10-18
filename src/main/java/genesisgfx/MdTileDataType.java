@@ -5,6 +5,7 @@ import java.awt.image.BufferedImage;
 import javax.swing.ImageIcon;
 
 import ghidra.docking.settings.Settings;
+import ghidra.docking.settings.SettingsDefinition;
 import ghidra.program.model.data.BuiltIn;
 import ghidra.program.model.data.CategoryPath;
 import ghidra.program.model.data.DataImage;
@@ -44,6 +45,12 @@ public class MdTileDataType extends BuiltIn implements Resource {
 	@Override
 	public String getMnemonic(Settings settings) {
 		return NAME;
+	}
+
+	/** The codec the region is stored with; absent means raw. */
+	@Override
+	protected SettingsDefinition[] getBuiltInSettingsDefinitions() {
+		return new SettingsDefinition[] { GenesisCodecSetting.DEF };
 	}
 
 	@Override

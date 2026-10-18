@@ -18,6 +18,19 @@ mouse, and jumps to it on double click.
 
 ![preview](docs/screenshot.png)
 
+## Compressed data
+
+**Genesis > Define compressed ...** decompresses the stream at the cursor with the codec you pick
+and defines exactly its compressed bytes (`md_tiles_packed[n]`, `md_tilemap_packed[n]`,
+`md_palette_packed[n]`). The preview decodes it through the same codec. The codec is a data setting
+saved with the program ("Genesis compression" in **Data > Settings**), so it can also be set on an
+existing definition; the default, `none`, uses the bytes as they are.
+
+Bundled codecs: `nemesis`, `enigma`, `kosinski`, `saxman` (with its length header) and `comper`.
+Each is tested against streams from two independent encoders (mdcomp, and clownnemesis/clownlzss):
+`src/test/codec/codec_test.py`. More can be added by implementing `genesisgfx.GenesisCodec` in a
+class whose name ends in `Codec`, or by calling `GenesisCodecs.register`.
+
 ## Install
 
 Download a release zip, or build one:
@@ -31,7 +44,8 @@ CodeBrowser (**File > Configure > Miscellaneous**). Built and tested against Ghi
 
 `ghidra_scripts/GenesisGfxExport.java` defines and exports the same images as PNGs headless.
 `src/test/headless/run.sh` builds a synthetic ROM, runs the extension headless and compares every
-rendered pixel against an independent Python decoder.
+rendered pixel against an independent Python decoder, then repeats with the tiles and tilemap
+Nemesis- and Enigma-compressed by a reference encoder.
 
 Colour channels expand 3 bits to 8 linearly (`v * 255 / 7`).
 

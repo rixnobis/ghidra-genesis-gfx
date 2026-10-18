@@ -182,7 +182,7 @@ public class GenesisPreviewPanel extends JPanel {
 			public java.awt.Component getListCellRendererComponent(JList<?> list, Object value, int index,
 					boolean selected, boolean focus) {
 				Object shown = value instanceof Item i
-						? i.displayName() + " (" + (i.length / unitBytes) + unit + ")"
+						? i.displayName() + " (" + (i.bytes.length / unitBytes) + unit + ")"
 						: "(none defined)";
 				return super.getListCellRendererComponent(list, shown, index, selected, focus);
 			}
@@ -294,7 +294,7 @@ public class GenesisPreviewPanel extends JPanel {
 			return;
 		}
 		widthGuessedFor = m.address;
-		int n = m.length / 2;
+		int n = m.bytes.length / 2;
 		int w = n;
 		for (int cand : new int[] { 64, 40, 32, 128 }) {
 			if (n >= cand && n % cand == 0) {
@@ -404,15 +404,18 @@ public class GenesisPreviewPanel extends JPanel {
 		if (MODE_TILES.equals(mode.getSelectedItem())) {
 			Item t = (Item) tileSet.getSelectedItem();
 			int cell = cellAt(x, y, renderedPerRow);
-			return t != null && cell >= 0 && cell < t.length / GenesisGfx.TILE_BYTES
-					? t.address.add((long) cell * GenesisGfx.TILE_BYTES)
-					: null;
+			if (t == null || cell < 0 || cell >= t.bytes.length / GenesisGfx.TILE_BYTES) {
+				return null;
+			}
+			// A compressed tile has no address of its own: point at the stream.
+			return t.isCompressed() ? t.address : t.address.add((long) cell * GenesisGfx.TILE_BYTES);
 		}
 		Item m = (Item) tilemap.getSelectedItem();
 		int cell = cellAt(x, y, renderedWidthCells);
-		return m != null && renderedEntries != null && cell >= 0 && cell < renderedEntries.length
-				? m.address.add(cell * 2L)
-				: null;
+		if (m == null || renderedEntries == null || cell < 0 || cell >= renderedEntries.length) {
+			return null;
+		}
+		return m.isCompressed() ? m.address : m.address.add(cell * 2L);
 	}
 
 	private void hover(int x, int y) {
@@ -422,13 +425,19 @@ public class GenesisPreviewPanel extends JPanel {
 			return;
 		}
 		if (MODE_TILES.equals(mode.getSelectedItem())) {
-			status.setText(String.format("tile %d @ %s", cellAt(x, y, renderedPerRow), a));
+			int cell = cellAt(x, y, renderedPerRow);
+			Item t = (Item) tileSet.getSelectedItem();
+			status.setText(t.isCompressed()
+					? String.format("tile %d @ %s+%X (%s)", cell, a, cell * GenesisGfx.TILE_BYTES, t.codec)
+					: String.format("tile %d @ %s", cell, a));
 		}
 		else {
 			int cell = cellAt(x, y, renderedWidthCells);
 			int e = renderedEntries[cell];
+			Item m = (Item) tilemap.getSelectedItem();
+			String where = m.isCompressed() ? String.format("%s+%X (%s)", a, cell * 2, m.codec) : a.toString();
 			status.setText(String.format("cell (%d,%d) @ %s  %04X  %s", cell % renderedWidthCells,
-				cell / renderedWidthCells, a, e, GenesisGfx.describeEntry(e)));
+				cell / renderedWidthCells, where, e, GenesisGfx.describeEntry(e)));
 		}
 	}
 

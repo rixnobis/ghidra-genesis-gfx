@@ -1,6 +1,7 @@
 package genesisgfx;
 
 import ghidra.docking.settings.Settings;
+import ghidra.docking.settings.SettingsDefinition;
 import ghidra.program.model.data.BuiltIn;
 import ghidra.program.model.data.CategoryPath;
 import ghidra.program.model.data.DataType;
@@ -39,6 +40,12 @@ public class MdTilemapEntryDataType extends BuiltIn {
 	@Override
 	public String getMnemonic(Settings settings) {
 		return NAME;
+	}
+
+	/** The codec the region is stored with; absent means raw. */
+	@Override
+	protected SettingsDefinition[] getBuiltInSettingsDefinitions() {
+		return new SettingsDefinition[] { GenesisCodecSetting.DEF };
 	}
 
 	@Override

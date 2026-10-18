@@ -19,18 +19,40 @@ public class GenesisGfxCatalog {
 		public final String name;
 		/** Bytes covered by the definition. */
 		public final int length;
+		/** Decoded bytes: the defined bytes, or the codec's output. Empty when decoding failed. */
 		public final byte[] bytes;
+		/** Codec the region is stored with, null for raw. */
+		public final String codec;
+		/** Compressed bytes the codec consumed, or 0. */
+		public final int consumed;
+		/** Why decoding failed, or null. */
+		public final String error;
 
 		Item(Address address, String name, int length, byte[] bytes) {
+			this(address, name, length, bytes, null, 0, null);
+		}
+
+		Item(Address address, String name, int length, byte[] bytes, String codec, int consumed, String error) {
 			this.address = address;
 			this.name = name;
 			this.length = length;
 			this.bytes = bytes;
+			this.codec = codec;
+			this.consumed = consumed;
+			this.error = error;
 		}
 
-		/** The label and address, or the address alone for unlabeled data. */
+		public boolean isCompressed() {
+			return codec != null;
+		}
+
+		/** The label and address, or the address alone for unlabeled data, plus the codec. */
 		public String displayName() {
-			return name == null ? address.toString() : name + " @ " + address;
+			String s = name == null ? address.toString() : name + " @ " + address;
+			if (codec != null) {
+				s += error != null ? " [" + codec + ": " + error + "]" : " [" + codec + "]";
+			}
+			return s;
 		}
 
 		public boolean contains(Address a) {
@@ -83,28 +105,31 @@ public class GenesisGfxCatalog {
 			Data d = it.next();
 			DataType dt = unwrap(d.getDataType());
 			DataType elem = dt instanceof Array a ? unwrap(a.getDataType()) : dt;
-			List<Item> target;
+			GenesisDefiner.Kind kind;
 			if (elem instanceof MdColorDataType) {
-				target = c.palettes;
+				kind = GenesisDefiner.Kind.PALETTE;
 			}
 			else if (elem instanceof MdTileDataType) {
-				target = c.tileSets;
+				kind = GenesisDefiner.Kind.TILES;
 			}
 			else if (elem instanceof MdTilemapEntryDataType) {
-				target = c.tilemaps;
+				kind = GenesisDefiner.Kind.TILEMAP;
+			}
+			else if (elem instanceof MdPackedDataType p) {
+				kind = p.getKind();
 			}
 			else {
 				continue;
 			}
-			byte[] bytes = new byte[d.getLength()];
-			try {
-				d.getBytes(bytes, 0);
+			List<Item> target = switch (kind) {
+				case PALETTE -> c.palettes;
+				case TILES -> c.tileSets;
+				case TILEMAP -> c.tilemaps;
+			};
+			Item item = decode(program, d);
+			if (item != null) {
+				target.add(item);
 			}
-			catch (Exception e) {
-				continue;
-			}
-			String label = d.getLabel();
-			target.add(new Item(d.getAddress(), label, d.getLength(), bytes));
 		}
 		for (Item p : c.palettes) {
 			int[] rgb = GenesisGfx.decodeColors(p.bytes);
@@ -116,6 +141,33 @@ public class GenesisGfxCatalog {
 			}
 		}
 		return c;
+	}
+
+	/** Reads a definition's bytes, through its codec when one is set. Null if unreadable. */
+	static Item decode(Program program, Data d) {
+		String label = d.getLabel();
+		String codecName = GenesisCodecSetting.DEF.getCodecName(d);
+		if (GenesisCodecs.NONE.equals(codecName)) {
+			byte[] bytes = new byte[d.getLength()];
+			try {
+				d.getBytes(bytes, 0);
+			}
+			catch (Exception e) {
+				return null;
+			}
+			return new Item(d.getAddress(), label, d.getLength(), bytes);
+		}
+		GenesisCodec codec = GenesisCodecs.get(codecName);
+		if (codec == null) {
+			return new Item(d.getAddress(), label, d.getLength(), new byte[0], codecName, 0, "unknown codec");
+		}
+		try {
+			GenesisCodec.Result r = codec.decompress(GenesisDefiner.readFrom(program, d.getAddress()), 0);
+			return new Item(d.getAddress(), label, d.getLength(), r.data(), codecName, r.consumed(), null);
+		}
+		catch (Exception e) {
+			return new Item(d.getAddress(), label, d.getLength(), new byte[0], codecName, 0, e.getMessage());
+		}
 	}
 
 	public static Item find(List<Item> items, Address a) {

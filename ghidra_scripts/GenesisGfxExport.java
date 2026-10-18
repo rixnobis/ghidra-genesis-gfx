@@ -2,7 +2,8 @@
 //
 // Arguments: <outdir> [width=<tilemap width>] [zoom=<n>] [palette|tiles|tilemap:<address>:<count> ...]
 // Each define argument defines <count> palette lines, tiles or tilemap entries at <address> first;
-// an optional fourth field (kind:address:count:name) labels it.
+// an optional fourth field (kind:address:count:name) labels it. A codec name in place of the count
+// (tiles:0x400:nemesis) defines the compressed stream there instead.
 // Exports the first tile set once per palette line (tiles_line<N>.png), the first tilemap
 // (tilemap.png, palette lines 0-3 and the first tile set) and the preview panel in both modes.
 //@category Genesis
@@ -12,6 +13,8 @@ import java.io.File;
 
 import javax.imageio.ImageIO;
 
+import genesisgfx.GenesisCodecSetting;
+import genesisgfx.GenesisCodecs;
 import genesisgfx.GenesisDefiner;
 import genesisgfx.GenesisGfx;
 import genesisgfx.GenesisGfxCatalog;
@@ -45,16 +48,25 @@ public class GenesisGfxExport extends GhidraScript {
 			String[] p = a.split(":");
 			GenesisDefiner.Kind kind = GenesisDefiner.Kind.valueOf(p[0].toUpperCase());
 			Address addr = toAddr(p[1]);
-			Data d = GenesisDefiner.define(currentProgram, addr, Integer.decode(p[2]), kind);
+			Data d = p[2].matches("(0x)?[0-9a-fA-F]+") && !GenesisCodecs.names().contains(p[2])
+					? GenesisDefiner.define(currentProgram, addr, Integer.decode(p[2]), kind)
+					: GenesisDefiner.defineCompressed(currentProgram, addr, kind, p[2]);
 			if (p.length > 3) {
 				createLabel(addr, p[3], true);
 			}
-			println("defined " + d.getDataType().getName() + " at " + addr);
+			println("defined " + d.getDataType().getName() + " at " + addr + " codec " +
+				GenesisCodecSetting.DEF.getCodecName(d));
 		}
 
 		GenesisGfxCatalog c = GenesisGfxCatalog.scan(currentProgram);
 		println(String.format("catalog: %d palettes (%d lines), %d tile sets, %d tilemaps", c.palettes.size(),
 			c.lines.size(), c.tileSets.size(), c.tilemaps.size()));
+		for (java.util.List<GenesisGfxCatalog.Item> l : java.util.List.of(c.palettes, c.tileSets, c.tilemaps)) {
+			for (GenesisGfxCatalog.Item i : l) {
+				println("item " + i.displayName() + " defined=" + i.length + " decoded=" + i.bytes.length +
+					" consumed=" + i.consumed);
+			}
+		}
 		for (GenesisGfxCatalog.Item p : c.palettes) {
 			Data d = getDataAt(p.address);
 			for (int i = 0; i < Math.min(4, d.getNumComponents()); i++) {
@@ -65,6 +77,9 @@ public class GenesisGfxExport extends GhidraScript {
 		}
 		for (GenesisGfxCatalog.Item m : c.tilemaps) {
 			Data d = getDataAt(m.address);
+			if (m.isCompressed()) {
+				continue;
+			}
 			for (int i = 16; i < Math.min(20, d.getNumComponents()); i++) {
 				Data comp = d.getComponent(i);
 				println("  " + comp.getAddress() + " " + comp.getDataType().getName() + " " +

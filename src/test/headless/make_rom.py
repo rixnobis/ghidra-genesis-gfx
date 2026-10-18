@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-"""Writes a synthetic Mega Drive ROM with a known palette, tile set and tilemap.
+"""Writes a synthetic Mega Drive ROM with a known palette, tile set and tilemap, raw or with the
+tiles and tilemap compressed by reference encoders.
 
 Layout: 0x200 palette (4 lines), 0x400 tiles (8), 0x1000 tilemap (16x8 entries).
 """
@@ -79,6 +80,37 @@ def build():
     return bytes(rom)
 
 
+def build_packed(nem_encoder, eni_encoder):
+    """The same ROM with the tiles stored Nemesis-compressed at TILES_OFF and the tilemap
+    Enigma-compressed at MAP_OFF, each compressed by an external reference encoder
+    (argv: encoder input output). The bytes after each stream are filled with 0xA5 so a decoder
+    that reads too far renders garbage."""
+    import os
+    import subprocess
+    import tempfile
+    rom = bytearray(build())
+    with tempfile.TemporaryDirectory() as d:
+        def pack(encoder, data):
+            raw, out = os.path.join(d, "raw"), os.path.join(d, "out")
+            open(raw, "wb").write(data)
+            subprocess.run([encoder, raw, out], check=True, capture_output=True)
+            return open(out, "rb").read()
+        tiles_z = pack(nem_encoder, pack_tiles(tiles()))
+        map_z = pack(eni_encoder, struct.pack(">128H", *tilemap()))
+    rom[TILES_OFF:MAP_OFF] = b"\xa5" * (MAP_OFF - TILES_OFF)
+    rom[MAP_OFF:MAP_OFF + 256] = b"\xa5" * 256
+    rom[TILES_OFF:TILES_OFF + len(tiles_z)] = tiles_z
+    rom[MAP_OFF:MAP_OFF + len(map_z)] = map_z
+    return bytes(rom), len(tiles_z), len(map_z)
+
+
 if __name__ == "__main__":
-    with open(sys.argv[1], "wb") as f:
-        f.write(build())
+    # make_rom.py out.bin | make_rom.py --packed nemesis-encoder enigma-encoder out.bin
+    if sys.argv[1] == "--packed":
+        rom, nt, nm = build_packed(sys.argv[2], sys.argv[3])
+        with open(sys.argv[4], "wb") as f:
+            f.write(rom)
+        print(f"nemesis tiles {nt} bytes, enigma map {nm} bytes")
+    else:
+        with open(sys.argv[1], "wb") as f:
+            f.write(build())
