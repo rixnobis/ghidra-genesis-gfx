@@ -4,9 +4,11 @@ import java.awt.BorderLayout;
 import java.awt.CardLayout;
 import java.awt.Color;
 import java.awt.Dimension;
-import java.awt.FlowLayout;
 import java.awt.Graphics;
 import java.awt.Graphics2D;
+import java.awt.GridBagConstraints;
+import java.awt.GridBagLayout;
+import java.awt.Insets;
 import java.awt.RenderingHints;
 import java.awt.event.MouseEvent;
 import java.awt.event.MouseMotionAdapter;
@@ -27,6 +29,7 @@ import javax.swing.JPanel;
 import javax.swing.JScrollPane;
 import javax.swing.JSpinner;
 import javax.swing.SpinnerNumberModel;
+import javax.swing.ToolTipManager;
 
 import genesisgfx.GenesisGfx.PriorityFilter;
 import genesisgfx.GenesisGfxCatalog.Item;
@@ -100,7 +103,19 @@ public class GenesisPreviewPanel extends JPanel {
 
 		JPanel top = new JPanel();
 		top.setLayout(new BoxLayout(top, BoxLayout.Y_AXIS));
-		top.add(row(new JLabel("Mode"), mode, new JLabel("Zoom"), zoom, transparent, grid));
+		JPanel modeRow = new WrapRow(this);
+		for (JComponent c : new JComponent[] { new JLabel("Mode"), mode, new JLabel("Zoom"), zoom, transparent,
+			grid }) {
+			modeRow.add(c);
+		}
+		modeRow.setAlignmentX(LEFT_ALIGNMENT);
+		top.add(modeRow);
+		addComponentListener(new java.awt.event.ComponentAdapter() {
+			@Override
+			public void componentResized(java.awt.event.ComponentEvent e) {
+				modeRow.revalidate();
+			}
+		});
 
 		JPanel tilesCard = new JPanel();
 		tilesCard.setLayout(new BoxLayout(tilesCard, BoxLayout.Y_AXIS));
@@ -112,8 +127,9 @@ public class GenesisPreviewPanel extends JPanel {
 		mapCard.add(row(new JLabel("Tilemap"), tilemap, new JLabel("Width"), mapWidth, new JLabel("Priority"),
 			priority));
 		mapCard.add(row(new JLabel("Tiles (VRAM)"), vram, new JLabel("First tile index"), baseTile));
-		mapCard.add(row(new JLabel("Line 0"), cram[0], new JLabel("Line 1"), cram[1]));
-		mapCard.add(row(new JLabel("Line 2"), cram[2], new JLabel("Line 3"), cram[3]));
+		mapCard.add(grid(new JComponent[][] {
+			{ new JLabel("Line 0"), cram[0], new JLabel("Line 1"), cram[1] },
+			{ new JLabel("Line 2"), cram[2], new JLabel("Line 3"), cram[3] } }));
 
 		cards.setAlignmentX(LEFT_ALIGNMENT);
 		cards.add(tilesCard, MODE_TILES);
@@ -232,10 +248,58 @@ public class GenesisPreviewPanel extends JPanel {
 		this.navigator = navigator;
 	}
 
+	/** Client property marking the combo boxes that list long item text and may stretch or shrink. */
+	private static final String STRETCH = "genesisgfx.stretch";
+
+	/** Narrowest a stretchy combo box may get; longer item text is cut with an ellipsis (full text in the tooltip). */
+	private static final int COMBO_MIN_WIDTH = 90;
+
+	/**
+	 * One row of controls. Labels, spinners, check boxes and short combo boxes keep their preferred size; the
+	 * item and palette combo boxes share whatever width is left and may shrink down to
+	 * {@link #COMBO_MIN_WIDTH}, so nothing is ever pushed out of view.
+	 */
 	private static JPanel row(JComponent... comps) {
-		JPanel p = new JPanel(new FlowLayout(FlowLayout.LEFT, 6, 2));
-		for (JComponent c : comps) {
-			p.add(c);
+		return grid(new JComponent[][] { comps });
+	}
+
+	private static boolean isStretchy(JComponent c) {
+		return Boolean.TRUE.equals(c.getClientProperty(STRETCH));
+	}
+
+	/** Rows of controls on one shared column grid (combo columns stretch, the rest stay compact). */
+	private static JPanel grid(JComponent[][] rows) {
+		JPanel p = new JPanel(new GridBagLayout());
+		boolean stretch = false;
+		int cols = 0;
+		for (JComponent[] r : rows) {
+			cols = Math.max(cols, r.length);
+			for (JComponent c : r) {
+				stretch |= isStretchy(c);
+			}
+		}
+		for (int y = 0; y < rows.length; y++) {
+			for (int x = 0; x < rows[y].length; x++) {
+				JComponent c = rows[y][x];
+				GridBagConstraints gc = new GridBagConstraints();
+				gc.gridx = x;
+				gc.gridy = y;
+				gc.insets = new Insets(2, 3, 2, 3);
+				gc.anchor = GridBagConstraints.WEST;
+				if (isStretchy(c)) {
+					Dimension d = c.getPreferredSize();
+					c.setMinimumSize(new Dimension(COMBO_MIN_WIDTH, d.height));
+					gc.weightx = 1;
+					gc.fill = GridBagConstraints.HORIZONTAL;
+				}
+				p.add(c, gc);
+			}
+		}
+		if (!stretch) {
+			GridBagConstraints gc = new GridBagConstraints();
+			gc.gridx = cols;
+			gc.weightx = 1;
+			p.add(new JPanel(), gc);
 		}
 		p.setAlignmentX(LEFT_ALIGNMENT);
 		p.setMaximumSize(new Dimension(Integer.MAX_VALUE, p.getPreferredSize().height));
@@ -243,7 +307,16 @@ public class GenesisPreviewPanel extends JPanel {
 	}
 
 	private static JComboBox<Item> itemCombo(String unit, int unitBytes) {
-		JComboBox<Item> c = new JComboBox<>();
+		JComboBox<Item> c = new JComboBox<>() {
+			@Override
+			public String getToolTipText() {
+				return getSelectedItem() instanceof Item i
+						? i.displayName() + " (" + (i.bytes.length / unitBytes) + unit + ")"
+						: null;
+			}
+		};
+		ToolTipManager.sharedInstance().registerComponent(c);
+		c.putClientProperty(STRETCH, Boolean.TRUE);
 		c.setRenderer(new DefaultListCellRenderer() {
 			@Override
 			public java.awt.Component getListCellRendererComponent(JList<?> list, Object value, int index,
@@ -259,7 +332,14 @@ public class GenesisPreviewPanel extends JPanel {
 	}
 
 	private static JComboBox<PaletteLine> lineCombo() {
-		JComboBox<PaletteLine> c = new JComboBox<>();
+		JComboBox<PaletteLine> c = new JComboBox<>() {
+			@Override
+			public String getToolTipText() {
+				return getSelectedItem() == null ? null : getSelectedItem().toString();
+			}
+		};
+		ToolTipManager.sharedInstance().registerComponent(c);
+		c.putClientProperty(STRETCH, Boolean.TRUE);
 		c.setRenderer(new DefaultListCellRenderer() {
 			@Override
 			public java.awt.Component getListCellRendererComponent(JList<?> list, Object value, int index,
@@ -608,6 +688,55 @@ public class GenesisPreviewPanel extends JPanel {
 			String where = m.isCompressed() ? String.format("%s+%X (%s)", a, cell * 2, m.codec) : a.toString();
 			status.setText(String.format("cell (%d,%d) @ %s  %04X  %s", cell % renderedWidthCells,
 				cell / renderedWidthCells, where, e, GenesisGfx.describeEntry(e)));
+		}
+	}
+
+	/**
+	 * A left-aligned flow row that wraps onto further lines when the preview is narrower than the row,
+	 * reporting the height of the wrapped result (FlowLayout alone never does inside a BoxLayout).
+	 */
+	private static class WrapRow extends JPanel {
+		private static final int GAP = 6;
+		private final JComponent owner;
+
+		WrapRow(JComponent owner) {
+			super(new java.awt.FlowLayout(java.awt.FlowLayout.LEFT, GAP, 2));
+			this.owner = owner;
+		}
+
+		@Override
+		public Dimension getPreferredSize() {
+			int avail = owner.getWidth() > 0 ? owner.getWidth() : Integer.MAX_VALUE;
+			int x = GAP, lineH = 0, y = 2, widest = 0;
+			for (java.awt.Component c : getComponents()) {
+				if (!c.isVisible()) {
+					continue;
+				}
+				Dimension d = c.getPreferredSize();
+				if (x > GAP && x + d.width + GAP > avail) {
+					y += lineH + 2;
+					x = GAP;
+					lineH = 0;
+				}
+				x += d.width + GAP;
+				lineH = Math.max(lineH, d.height);
+				widest = Math.max(widest, x);
+			}
+			return new Dimension(widest, y + lineH + 2);
+		}
+
+		@Override
+		public Dimension getMinimumSize() {
+			int w = 0;
+			for (java.awt.Component c : getComponents()) {
+				w = Math.max(w, c.getPreferredSize().width + 2 * GAP);
+			}
+			return new Dimension(w, getPreferredSize().height);
+		}
+
+		@Override
+		public Dimension getMaximumSize() {
+			return new Dimension(Integer.MAX_VALUE, getPreferredSize().height);
 		}
 	}
 
