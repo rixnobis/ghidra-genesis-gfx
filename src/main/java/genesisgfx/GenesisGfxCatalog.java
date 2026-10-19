@@ -3,6 +3,9 @@ package genesisgfx;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
+import java.util.Objects;
+import java.util.function.Consumer;
+import java.util.function.Predicate;
 
 import ghidra.program.model.address.Address;
 import ghidra.program.model.data.Array;
@@ -27,12 +30,25 @@ public class GenesisGfxCatalog {
 		public final int consumed;
 		/** Why decoding failed, or null. */
 		public final String error;
+		/** Stored tilemap width in cells, 0 when unset (or not a tilemap). */
+		public final int width;
+		/** Stored first tile index, 0 when unset. */
+		public int baseTile;
+		/** Stored tile set / palette addresses, null when unset. They may point at nothing: check the catalog. */
+		public Address tilesRef;
+		public Address paletteRef;
 
 		Item(Address address, String name, int length, byte[] bytes) {
 			this(address, name, length, bytes, null, 0, null);
 		}
 
 		Item(Address address, String name, int length, byte[] bytes, String codec, int consumed, String error) {
+			this(address, name, length, bytes, codec, consumed, error, 0);
+		}
+
+		Item(Address address, String name, int length, byte[] bytes, String codec, int consumed, String error,
+				int width) {
+			this.width = width;
 			this.address = address;
 			this.name = name;
 			this.length = length;
@@ -147,6 +163,17 @@ public class GenesisGfxCatalog {
 	static Item decode(Program program, Data d) {
 		String label = d.getLabel();
 		String codecName = GenesisCodecSetting.DEF.getCodecName(d);
+		int width = GenesisTilemapWidthSetting.DEF.getWidth(d);
+		Item item = decodeBytes(program, d, label, codecName, width);
+		if (item != null) {
+			item.baseTile = GenesisTilemapBaseSetting.DEF.getBase(d);
+			item.tilesRef = GenesisTilemapRefSetting.TILES.getRef(d, program.getAddressFactory());
+			item.paletteRef = GenesisTilemapRefSetting.PALETTE.getRef(d, program.getAddressFactory());
+		}
+		return item;
+	}
+
+	private static Item decodeBytes(Program program, Data d, String label, String codecName, int width) {
 		if (GenesisCodecs.NONE.equals(codecName)) {
 			byte[] bytes = new byte[d.getLength()];
 			try {
@@ -155,19 +182,89 @@ public class GenesisGfxCatalog {
 			catch (Exception e) {
 				return null;
 			}
-			return new Item(d.getAddress(), label, d.getLength(), bytes);
+			return new Item(d.getAddress(), label, d.getLength(), bytes, null, 0, null, width);
 		}
 		GenesisCodec codec = GenesisCodecs.get(codecName);
 		if (codec == null) {
-			return new Item(d.getAddress(), label, d.getLength(), new byte[0], codecName, 0, "unknown codec");
+			return new Item(d.getAddress(), label, d.getLength(), new byte[0], codecName, 0, "unknown codec", width);
 		}
 		try {
 			GenesisCodec.Result r = codec.decompress(GenesisDefiner.readFrom(program, d.getAddress()), 0);
-			return new Item(d.getAddress(), label, d.getLength(), r.data(), codecName, r.consumed(), null);
+			return new Item(d.getAddress(), label, d.getLength(), r.data(), codecName, r.consumed(), null, width);
 		}
 		catch (Exception e) {
-			return new Item(d.getAddress(), label, d.getLength(), new byte[0], codecName, 0, e.getMessage());
+			return new Item(d.getAddress(), label, d.getLength(), new byte[0], codecName, 0, e.getMessage(), width);
 		}
+	}
+
+	/** The stored tilemap width of the tilemap defined at the address, 0 when unset. */
+	public static int storedWidth(Program program, Address a) {
+		Data d = program == null ? null : program.getListing().getDataAt(a);
+		return d == null ? 0 : GenesisTilemapWidthSetting.DEF.getWidth(d);
+	}
+
+	/** Writes (0 clears) the width on the tilemap defined at the address, in its own transaction. */
+	public static boolean storeWidth(Program program, Address a, int width) {
+		return store(program, a, "Set tilemap width", d -> GenesisTilemapWidthSetting.DEF.getWidth(d) == width,
+			d -> GenesisTilemapWidthSetting.DEF.setWidth(d, width));
+	}
+
+	/** Writes (0 clears) the first tile index on the tilemap defined at the address. */
+	public static boolean storeBase(Program program, Address a, int base) {
+		return store(program, a, "Set tilemap first tile index", d -> GenesisTilemapBaseSetting.DEF.getBase(d) == base,
+			d -> GenesisTilemapBaseSetting.DEF.setBase(d, base));
+	}
+
+	/** Writes (null clears) the tile set address on the tilemap defined at the address. */
+	public static boolean storeTiles(Program program, Address a, Address tiles) {
+		return storeRef(program, a, GenesisTilemapRefSetting.TILES, tiles, "Set tilemap tile set");
+	}
+
+	/** Writes (null clears) the palette address on the tilemap defined at the address. */
+	public static boolean storePalette(Program program, Address a, Address palette) {
+		return storeRef(program, a, GenesisTilemapRefSetting.PALETTE, palette, "Set tilemap palette");
+	}
+
+	private static boolean storeRef(Program program, Address a, GenesisTilemapRefSetting def, Address ref,
+			String what) {
+		String text = ref == null ? null : ref.toString(true);
+		return store(program, a, what, d -> Objects.equals(def.getText(d), text), d -> def.setRef(d, ref));
+	}
+
+	/** Runs the write on the Data at the address in one transaction, unless it already holds the value. */
+	private static boolean store(Program program, Address a, String what, Predicate<Data> same,
+			Consumer<Data> write) {
+		Data d = program == null ? null : program.getListing().getDataAt(a);
+		if (d == null || same.test(d)) {
+			return false;
+		}
+		int tx = program.startTransaction(what);
+		try {
+			write.accept(d);
+		}
+		finally {
+			program.endTransaction(tx, true);
+		}
+		return true;
+	}
+
+	private static Item at(List<Item> items, Address a) {
+		for (Item i : items) {
+			if (i.address.equals(a)) {
+				return i;
+			}
+		}
+		return null;
+	}
+
+	/** The tile set the tilemap's stored reference names, null when unset or nothing is defined there. */
+	public Item storedTiles(Item tilemap) {
+		return tilemap.tilesRef == null ? null : at(tileSets, tilemap.tilesRef);
+	}
+
+	/** The palette the tilemap's stored reference names, null when unset or nothing is defined there. */
+	public Item storedPalette(Item tilemap) {
+		return tilemap.paletteRef == null ? null : at(palettes, tilemap.paletteRef);
 	}
 
 	public static Item find(List<Item> items, Address a) {

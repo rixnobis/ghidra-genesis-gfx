@@ -42,10 +42,10 @@ public class MdTilemapEntryDataType extends BuiltIn {
 		return NAME;
 	}
 
-	/** The codec the region is stored with; absent means raw. */
+	/** The codec the region is stored with (absent means raw) and the map's width, tile set, first tile index and palette. */
 	@Override
 	protected SettingsDefinition[] getBuiltInSettingsDefinitions() {
-		return new SettingsDefinition[] { GenesisCodecSetting.DEF };
+		return GenesisTilemapSettings.definitions();
 	}
 
 	@Override

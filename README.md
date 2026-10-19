@@ -26,6 +26,18 @@ and defines exactly its compressed bytes (`md_tiles_packed[n]`, `md_tilemap_pack
 saved with the program ("Genesis compression" in **Data > Settings**), so it can also be set on an
 existing definition; the default, `none`, uses the bytes as they are.
 
+## Tilemap settings
+
+How a tilemap is drawn is saved with it, as data settings (**Data > Settings**, on both
+`md_tilemap_entry[n]` and `md_tilemap_packed[n]`): "Width (cells)", "Tiles (address)", "First tile
+index" and "Palette (address)". When they are set the preview uses them instead of guessing or keeping
+the last selection, and changing the Width spinner, the Tiles (VRAM) combo, the First tile index spinner
+or the palette lines writes them back (one undoable change each). The palette setting is the palette
+definition that line 0 was taken from; its lines 0-3 are used. A stored address that no longer holds a
+defined tile set or palette is ignored and named in the status line. `GenesisGfxExport` uses the stored
+values too, unless `width=N`, `tiles=<address>`, `base=N` or `palette=<address>` is given. Unset
+(width 0, index 0, no address) means the previous behaviour.
+
 Bundled codecs: `nemesis`, `enigma`, `kosinski`, `saxman` (with its length header) and `comper`.
 Each is tested against streams from two independent encoders (mdcomp, and clownnemesis/clownlzss):
 `src/test/codec/codec_test.py`. More can be added by implementing `genesisgfx.GenesisCodec` in a

@@ -1,5 +1,6 @@
 package genesisgfx;
 
+import ghidra.docking.settings.SettingsDefinition;
 import ghidra.program.model.data.DataType;
 import ghidra.program.model.data.DataTypeManager;
 
@@ -18,6 +19,11 @@ public class MdPackedTilemapDataType extends MdPackedDataType {
 	@Override
 	public GenesisDefiner.Kind getKind() {
 		return GenesisDefiner.Kind.TILEMAP;
+	}
+
+	@Override
+	protected SettingsDefinition[] getBuiltInSettingsDefinitions() {
+		return GenesisTilemapSettings.definitions();
 	}
 
 	@Override

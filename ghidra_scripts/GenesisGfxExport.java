@@ -1,9 +1,15 @@
 // Defines and/or exports Genesis graphics as PNG files. Usable headless.
 //
-// Arguments: <outdir> [width=<tilemap width>] [zoom=<n>] [palette|tiles|tilemap:<address>:<count> ...]
+// Arguments: <outdir> [width=<tilemap width>] [tiles=<address>] [base=<first tile index>]
+// [palette=<address>] [zoom=<n>] [palette|tiles|tilemap:<address>:<count> ...]
 // Each define argument defines <count> palette lines, tiles or tilemap entries at <address> first;
 // an optional fourth field (kind:address:count:name) labels it. A codec name in place of the count
 // (tiles:0x400:nemesis) defines the compressed stream there instead.
+// How the first tilemap is drawn: an explicit width=, tiles= (address of a defined tile set), base=
+// (first tile index) or palette= (address of a defined palette) wins; else what is stored with the
+// tilemap (its data settings, which the preview writes); else width 32, the first tile set, index 0
+// and the first four palette lines. A stored address with nothing defined there is reported and
+// ignored.
 // Exports the first tile set once per palette line (tiles_line<N>.png), the first tilemap
 // (tilemap.png, palette lines 0-3 and the first tile set) and the preview panel in both modes.
 //@category Genesis
@@ -33,12 +39,27 @@ public class GenesisGfxExport extends GhidraScript {
 		}
 		File out = new File(args[0]);
 		out.mkdirs();
-		int width = 32;
+		int width = 0;
+		int base = -1;
+		Address tilesArg = null;
+		Address paletteArg = null;
 		int zoom = 3;
 		for (int i = 1; i < args.length; i++) {
 			String a = args[i];
 			if (a.startsWith("width=")) {
 				width = Integer.decode(a.substring(6));
+				continue;
+			}
+			if (a.startsWith("base=")) {
+				base = Integer.decode(a.substring(5));
+				continue;
+			}
+			if (a.startsWith("tiles=")) {
+				tilesArg = toAddr(a.substring(6));
+				continue;
+			}
+			if (a.startsWith("palette=")) {
+				paletteArg = toAddr(a.substring(8));
 				continue;
 			}
 			if (a.startsWith("zoom=")) {
@@ -59,6 +80,49 @@ public class GenesisGfxExport extends GhidraScript {
 		}
 
 		GenesisGfxCatalog c = GenesisGfxCatalog.scan(currentProgram);
+		GenesisGfxCatalog.Item map = c.tilemaps.isEmpty() ? null : c.tilemaps.get(0);
+		if (width <= 0 && map != null) {
+			width = map.width;
+			println("tilemap width from setting: " + width);
+		}
+		if (width <= 0) {
+			width = 32;
+		}
+		println("using tilemap width " + width);
+		GenesisGfxCatalog.Item mapTiles = null;
+		GenesisGfxCatalog.Item mapPalette = null;
+		if (map != null) {
+			if (tilesArg != null) {
+				mapTiles = byAddress(c.tileSets, tilesArg);
+				if (mapTiles == null) {
+					printerr("tiles=" + tilesArg + ": no tile set defined there");
+				}
+			}
+			else if (map.tilesRef != null) {
+				mapTiles = c.storedTiles(map);
+				println(mapTiles != null ? "tile set from setting: " + map.tilesRef
+					: "stored tile set " + map.tilesRef + " is not defined; using the first tile set");
+			}
+			if (base < 0) {
+				base = map.baseTile;
+				if (base > 0) {
+					println("first tile index from setting: " + base);
+				}
+			}
+			if (paletteArg != null) {
+				mapPalette = byAddress(c.palettes, paletteArg);
+				if (mapPalette == null) {
+					printerr("palette=" + paletteArg + ": no palette defined there");
+				}
+			}
+			else if (map.paletteRef != null) {
+				mapPalette = c.storedPalette(map);
+				println(mapPalette != null ? "palette from setting: " + map.paletteRef
+					: "stored palette " + map.paletteRef + " is not defined; using the first palette lines");
+			}
+		}
+		base = Math.max(base, 0);
+		println("using first tile index " + base);
 		println(String.format("catalog: %d palettes (%d lines), %d tile sets, %d tilemaps", c.palettes.size(),
 			c.lines.size(), c.tileSets.size(), c.tilemaps.size()));
 		for (java.util.List<GenesisGfxCatalog.Item> l : java.util.List.of(c.palettes, c.tileSets, c.tilemaps)) {
@@ -99,10 +163,19 @@ public class GenesisGfxExport extends GhidraScript {
 		for (int i = 0; i < 4 && i < c.lines.size(); i++) {
 			lines[i] = c.lines.get(i).rgb;
 		}
+		if (mapPalette != null) {
+			lines = new int[4][];
+			for (GenesisGfxCatalog.PaletteLine l : c.lines) {
+				if (l.source == mapPalette && l.line < 4) {
+					lines[l.line] = l.rgb;
+				}
+			}
+		}
+		GenesisGfxCatalog.Item drawTiles = mapTiles != null ? mapTiles : tiles;
 		if (!c.tilemaps.isEmpty()) {
-			write(GenesisGfx.renderTilemap(GenesisGfx.decodeWords(c.tilemaps.get(0).bytes), width, tiles.bytes, 0,
+			write(GenesisGfx.renderTilemap(GenesisGfx.decodeWords(c.tilemaps.get(0).bytes), width, drawTiles.bytes, base,
 				lines, false, GenesisGfx.PriorityFilter.ALL), new File(out, "tilemap.png"));
-			write(GenesisGfx.renderTilemap(GenesisGfx.decodeWords(c.tilemaps.get(0).bytes), width, tiles.bytes, 0,
+			write(GenesisGfx.renderTilemap(GenesisGfx.decodeWords(c.tilemaps.get(0).bytes), width, drawTiles.bytes, base,
 				lines, true, GenesisGfx.PriorityFilter.HIGH), new File(out, "tilemap_high_transparent.png"));
 		}
 
@@ -114,8 +187,26 @@ public class GenesisGfxExport extends GhidraScript {
 		if (!c.tilemaps.isEmpty()) {
 			panel.setMode(GenesisPreviewPanel.MODE_TILEMAP);
 			panel.setMapWidth(width);
+			if (tilesArg != null) {
+				panel.selectTiles(tilesArg);
+			}
+			if (paletteArg != null) {
+				panel.selectPalette(paletteArg);
+			}
+			if (base > 0) {
+				panel.setBaseTile(base);
+			}
 			snapshot(panel, new File(out, "panel_tilemap.png"));
 		}
+	}
+
+	private static GenesisGfxCatalog.Item byAddress(java.util.List<GenesisGfxCatalog.Item> items, Address a) {
+		for (GenesisGfxCatalog.Item i : items) {
+			if (i.address.equals(a)) {
+				return i;
+			}
+		}
+		return null;
 	}
 
 	private void write(BufferedImage img, File f) throws Exception {

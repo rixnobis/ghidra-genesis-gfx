@@ -22,6 +22,27 @@ public class GenesisPreviewProvider extends ComponentProviderAdapter implements 
 		setWindowMenuGroup("Genesis");
 		setDefaultWindowPosition(docking.WindowPosition.RIGHT);
 		panel.setNavigator(plugin::navigate);
+		panel.setTilemapSink(new GenesisPreviewPanel.TilemapSink() {
+			@Override
+			public void width(Address tilemap, int cells) {
+				GenesisGfxCatalog.storeWidth(program, tilemap, cells);
+			}
+
+			@Override
+			public void baseTile(Address tilemap, int index) {
+				GenesisGfxCatalog.storeBase(program, tilemap, index);
+			}
+
+			@Override
+			public void tiles(Address tilemap, Address tileSet) {
+				GenesisGfxCatalog.storeTiles(program, tilemap, tileSet);
+			}
+
+			@Override
+			public void palette(Address tilemap, Address palette) {
+				GenesisGfxCatalog.storePalette(program, tilemap, palette);
+			}
+		});
 		addToTool();
 	}
 

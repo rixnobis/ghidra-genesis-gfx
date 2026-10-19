@@ -83,6 +83,11 @@ public class GenesisPreviewPanel extends JPanel {
 	private final JLabel status = new JLabel(" ");
 
 	private Address widthGuessedFor;
+	/** True while the code (not the user) moves the width, tiles, base or palette controls. */
+	private boolean applying;
+	private TilemapSink sink;
+	/** Why a stored tilemap setting was not used, shown in the status line; null when all was usable. */
+	private String note;
 	private int renderedWidthCells;
 	private int[] renderedEntries;
 	private int renderedPerRow;
@@ -133,11 +138,39 @@ public class GenesisPreviewPanel extends JPanel {
 		}
 		tilemap.addActionListener(e -> {
 			if (!updating) {
-				guessWidth();
+				applyStored();
 			}
 		});
 		for (JSpinner s : new JSpinner[] { zoom, perRow, mapWidth, baseTile }) {
 			s.addChangeListener(e -> refresh());
+		}
+		mapWidth.addChangeListener(e -> {
+			Item m = userChangedTilemap();
+			if (m != null) {
+				sink.width(m.address, (Integer) mapWidth.getValue());
+			}
+		});
+		baseTile.addChangeListener(e -> {
+			Item m = userChangedTilemap();
+			if (m != null) {
+				sink.baseTile(m.address, (Integer) baseTile.getValue());
+			}
+		});
+		vram.addActionListener(e -> {
+			Item m = userChangedTilemap();
+			if (m != null) {
+				Item t = (Item) vram.getSelectedItem();
+				sink.tiles(m.address, t == null ? null : t.address);
+			}
+		});
+		for (JComboBox<PaletteLine> c : cram) {
+			c.addActionListener(e -> {
+				Item m = userChangedTilemap();
+				if (m != null) {
+					PaletteLine l = (PaletteLine) cram[0].getSelectedItem();
+					sink.palette(m.address, l == null ? null : l.source.address);
+				}
+			});
 		}
 		transparent.addActionListener(e -> refresh());
 		grid.addActionListener(e -> refresh());
@@ -158,6 +191,40 @@ public class GenesisPreviewPanel extends JPanel {
 				}
 			}
 		});
+	}
+
+	/**
+	 * Receives what the user changes on the selected tilemap, to store with it in the program. A null
+	 * tile set or palette address means the selection was cleared.
+	 */
+	public interface TilemapSink {
+		void width(Address tilemap, int cells);
+
+		void baseTile(Address tilemap, int index);
+
+		void tiles(Address tilemap, Address tileSet);
+
+		void palette(Address tilemap, Address palette);
+	}
+
+	public void setTilemapSink(TilemapSink sink) {
+		this.sink = sink;
+	}
+
+	/** The selected tilemap when a control just changed because of the user, else null. */
+	private Item userChangedTilemap() {
+		return applying || updating || sink == null ? null : (Item) tilemap.getSelectedItem();
+	}
+
+	private void setWidthQuietly(int w) {
+		boolean was = applying;
+		applying = true;
+		try {
+			mapWidth.setValue(Math.max(1, Math.min(w, 512)));
+		}
+		finally {
+			applying = was;
+		}
 	}
 
 	/** Called with the address under the cursor on double click. */
@@ -230,9 +297,7 @@ public class GenesisPreviewPanel extends JPanel {
 		finally {
 			updating = false;
 		}
-		if (old.tilemaps.isEmpty() && !catalog.tilemaps.isEmpty()) {
-			guessWidth();
-		}
+		applyStored();
 		refresh();
 	}
 
@@ -287,10 +352,74 @@ public class GenesisPreviewPanel extends JPanel {
 		}
 	}
 
-	/** Guesses a width once per tilemap, so re-selecting the same map keeps the user's width. */
-	private void guessWidth() {
+	/**
+	 * Moves the controls to what is stored with the selected tilemap: width, tile set, first tile
+	 * index and palette. Whatever is not stored, or is stored but points at nothing that is defined
+	 * any more, is left as it is (the width is guessed); the latter is reported in the status line.
+	 * Only controls that differ from the stored value are touched, so this is safe to repeat.
+	 */
+	private void applyStored() {
 		Item m = (Item) tilemap.getSelectedItem();
-		if (m == null || m.address.equals(widthGuessedFor)) {
+		String was = note;
+		note = null;
+		if (m == null) {
+			return;
+		}
+		guessWidth(m);
+		boolean wasApplying = applying;
+		applying = true;
+		try {
+			if (m.tilesRef != null) {
+				Item t = catalog.storedTiles(m);
+				if (t == null) {
+					warn("stored tile set " + m.tilesRef + " is not defined any more; using the selected tiles");
+				}
+				else if (!Objects.equals(vram.getSelectedItem(), t)) {
+					vram.setSelectedItem(t);
+				}
+			}
+			if (m.baseTile > 0 && (Integer) baseTile.getValue() != m.baseTile) {
+				baseTile.setValue(m.baseTile);
+			}
+			if (m.paletteRef != null) {
+				Item p = catalog.storedPalette(m);
+				PaletteLine first = (PaletteLine) cram[0].getSelectedItem();
+				if (p == null) {
+					warn("stored palette " + m.paletteRef + " is not defined any more; using the selected lines");
+				}
+				else if (first == null || !first.source.address.equals(p.address)) {
+					for (int i = 0; i < 4; i++) {
+						PaletteLine pick = null;
+						for (PaletteLine l : catalog.lines) {
+							if (l.source.address.equals(p.address) && l.line == i) {
+								pick = l;
+							}
+						}
+						cram[i].setSelectedItem(pick);
+					}
+				}
+			}
+		}
+		finally {
+			applying = wasApplying;
+		}
+		if (!Objects.equals(was, note)) {
+			refresh();
+		}
+	}
+
+	private void warn(String why) {
+		note = note == null ? why : note + "; " + why;
+	}
+
+	/** Uses the stored width when there is one; otherwise guesses once per tilemap, so re-selecting keeps the user's. */
+	private void guessWidth(Item m) {
+		if (m.width > 0) {
+			widthGuessedFor = m.address;
+			setWidthQuietly(m.width);
+			return;
+		}
+		if (m.address.equals(widthGuessedFor)) {
 			return;
 		}
 		widthGuessedFor = m.address;
@@ -302,7 +431,7 @@ public class GenesisPreviewPanel extends JPanel {
 				break;
 			}
 		}
-		mapWidth.setValue(Math.min(w, 512));
+		setWidthQuietly(w);
 	}
 
 	public void setMode(String m) {
@@ -319,6 +448,46 @@ public class GenesisPreviewPanel extends JPanel {
 
 	public void setMapWidth(int w) {
 		mapWidth.setValue(w);
+	}
+
+	/** Sets the first tile index as the user would. */
+	public void setBaseTile(int i) {
+		baseTile.setValue(i);
+	}
+
+	/** Selects the tile set defined at the address for the tilemap, as the user would. */
+	public boolean selectTiles(Address a) {
+		for (Item t : catalog.tileSets) {
+			if (t.address.equals(a)) {
+				vram.setSelectedItem(t);
+				return true;
+			}
+		}
+		return false;
+	}
+
+	/** Selects lines 0-3 of the palette defined at the address, as the user would. */
+	public boolean selectPalette(Address a) {
+		for (Item p : catalog.palettes) {
+			if (p.address.equals(a)) {
+				for (int i = 0; i < 4; i++) {
+					PaletteLine pick = null;
+					for (PaletteLine l : catalog.lines) {
+						if (l.source == p && l.line == i) {
+							pick = l;
+						}
+					}
+					cram[i].setSelectedItem(pick);
+				}
+				return true;
+			}
+		}
+		return false;
+	}
+
+	/** The status line text. */
+	public String getStatus() {
+		return status.getText();
 	}
 
 	/** Follows the listing cursor: selects whatever defined item contains the address. */
@@ -383,7 +552,8 @@ public class GenesisPreviewPanel extends JPanel {
 			}
 		}
 		canvas.set(img, (Integer) zoom.getValue(), grid.isSelected());
-		status.setText(img == null ? "Define tiles, palettes or a tilemap from the listing's right-click menu." : " ");
+		status.setText(img == null ? "Define tiles, palettes or a tilemap from the listing's right-click menu."
+			: note == null ? " " : note);
 	}
 
 	/** The rendered image at 1:1 scale, or null. */
