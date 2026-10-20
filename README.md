@@ -26,6 +26,14 @@ and defines exactly its compressed bytes (`md_tiles_packed[n]`, `md_tilemap_pack
 saved with the program ("Genesis compression" in **Data > Settings**), so it can also be set on an
 existing definition; the default, `none`, uses the bytes as they are.
 
+## Repeat last define
+
+**Genesis > Repeat last define** (Ctrl+Shift+Y, or the refresh button in the Genesis Graphics window)
+defines the same kind with the same codec, or the same count for raw data, at the cursor, or at the
+selection start. It is remembered per open program and disabled until something has been defined through
+the plugin. Ghidra's own Y (repeat last data type) is unchanged; the key can be rebound under Edit > Tool
+Options > Key Bindings.
+
 ## Tilemap settings
 
 How a tilemap is drawn is saved with it, as data settings (**Data > Settings**, on both

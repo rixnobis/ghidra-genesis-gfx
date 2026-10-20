@@ -1,11 +1,20 @@
 package genesisgfx;
 
+import java.awt.event.InputEvent;
+import java.awt.event.KeyEvent;
 import java.util.ArrayList;
 import java.util.EnumMap;
 import java.util.List;
 import java.util.Map;
+import java.util.WeakHashMap;
 
+import javax.swing.KeyStroke;
+
+import docking.ActionContext;
+import docking.action.DockingAction;
+import docking.action.KeyBindingData;
 import docking.action.MenuData;
+import docking.action.ToolBarData;
 import docking.widgets.dialogs.InputWithChoicesDialog;
 import docking.widgets.dialogs.NumberInputDialog;
 import ghidra.MiscellaneousPluginPackage;
@@ -23,6 +32,7 @@ import ghidra.program.model.listing.Program;
 import ghidra.program.util.ProgramLocation;
 import ghidra.program.util.ProgramSelection;
 import ghidra.util.Msg;
+import resources.Icons;
 
 //@formatter:off
 @PluginInfo(
@@ -77,6 +87,96 @@ public class GenesisGfxPlugin extends ProgramPlugin {
 				null, MENU, MenuData.NO_MNEMONIC, "2" + kind.ordinal()));
 			tool.addAction(a);
 		}
+		addRepeatActions();
+	}
+
+	/**
+	 * Default key for "Repeat last define". Ghidra's own Y (repeat last data type) is left alone; the user can
+	 * rebind this one under Edit > Tool Options > Key Bindings.
+	 */
+	static final KeyStroke REPEAT_KEY =
+		KeyStroke.getKeyStroke(KeyEvent.VK_Y, InputEvent.CTRL_DOWN_MASK | InputEvent.SHIFT_DOWN_MASK);
+	private static final String REPEAT_NOTHING = "Repeat last Genesis define (nothing defined yet in this program)";
+
+	/** What the last define through the plugin was, so it can be repeated at another address. */
+	private record LastDefine(GenesisDefiner.Kind kind, String codec, int units) {
+		String describe() {
+			return codec == null ? kind.label + ", " + units + " " + kind.unitName
+					: "compressed " + kind.label + ", " + codec;
+		}
+	}
+
+	/** Last define per open program, so another program does not inherit it. */
+	private final Map<Program, LastDefine> lastDefine = new WeakHashMap<>();
+	private ListingContextAction repeatAction;
+	private DockingAction repeatPreviewAction;
+
+	private void addRepeatActions() {
+		repeatAction = new ListingContextAction("Repeat Last Genesis Define", getName()) {
+			@Override
+			protected void actionPerformed(ListingActionContext ctx) {
+				repeatLast(ctx.getProgram(), ctx.getAddress(), ctx.getSelection());
+			}
+
+			@Override
+			protected boolean isEnabledForContext(ListingActionContext ctx) {
+				return ctx.getProgram() != null && ctx.getAddress() != null &&
+					lastDefine.containsKey(ctx.getProgram());
+			}
+		};
+		repeatAction.setKeyBindingData(new KeyBindingData(REPEAT_KEY));
+		repeatAction.setDescription(REPEAT_NOTHING);
+		repeatAction.setPopupMenuData(new MenuData(new String[] { MENU, "Repeat last define" }, null, MENU,
+			MenuData.NO_MNEMONIC, "05"));
+		tool.addAction(repeatAction);
+
+		repeatPreviewAction = new DockingAction("Repeat Last Genesis Define (preview)", getName()) {
+			@Override
+			public void actionPerformed(ActionContext context) {
+				if (currentProgram != null && currentLocation != null) {
+					repeatLast(currentProgram, currentLocation.getAddress(), currentSelection);
+				}
+			}
+		};
+		repeatPreviewAction.setToolBarData(new ToolBarData(Icons.REFRESH_ICON, "Genesis"));
+		repeatPreviewAction.setDescription(REPEAT_NOTHING);
+		repeatPreviewAction.setEnabled(false);
+		provider.addLocalAction(repeatPreviewAction);
+	}
+
+	/** Remembers a define and tells the actions what they would repeat. */
+	private void remember(Program p, LastDefine l) {
+		lastDefine.put(p, l);
+		updateRepeatActions();
+	}
+
+	private void updateRepeatActions() {
+		if (repeatAction == null) {
+			return;
+		}
+		LastDefine l = currentProgram == null ? null : lastDefine.get(currentProgram);
+		String text = l == null ? REPEAT_NOTHING : "Repeat last Genesis define: " + l.describe();
+		repeatAction.setDescription(text);
+		repeatAction.setPopupMenuData(new MenuData(
+			new String[] { MENU, l == null ? "Repeat last define" : "Repeat last define (" + l.describe() + ")" },
+			null, MENU, MenuData.NO_MNEMONIC, "05"));
+		repeatPreviewAction.setDescription(text);
+		repeatPreviewAction.setEnabled(l != null);
+	}
+
+	/** Defines the same kind, with the same codec or count, at the cursor (or selection). */
+	private void repeatLast(Program p, Address cursor, ProgramSelection sel) {
+		LastDefine l = p == null ? null : lastDefine.get(p);
+		if (l == null || cursor == null) {
+			return;
+		}
+		if (l.codec() == null) {
+			defineRaw(p, cursor, sel, l.kind(), l.units());
+		}
+		else {
+			Address at = sel != null && !sel.isEmpty() ? sel.getMinAddress() : cursor;
+			runCompressed(p, at, l.kind(), l.codec());
+		}
 	}
 
 	/** Codec last chosen per kind, so tiles and tilemaps each keep their own default. */
@@ -100,12 +200,18 @@ public class GenesisGfxPlugin extends ProgramPlugin {
 		}
 		String codec = d.getValue();
 		lastCodec.put(kind, codec);
+		runCompressed(p, at, kind, codec);
+	}
+
+	/** Decompresses at the address with the codec and defines the stream, in one transaction. */
+	private void runCompressed(Program p, Address at, GenesisDefiner.Kind kind, String codec) {
 		int tx = p.startTransaction("Define compressed Genesis " + kind.label);
 		boolean ok = false;
 		try {
 			Data data = GenesisDefiner.defineCompressed(p, at, kind, codec);
 			tool.setStatusInfo(String.format("%s: %d compressed bytes at %s", codec, data.getLength(), at));
 			ok = true;
+			remember(p, new LastDefine(kind, codec, 0));
 		}
 		catch (Exception e) {
 			Msg.showError(this, null, "Genesis",
@@ -120,14 +226,22 @@ public class GenesisGfxPlugin extends ProgramPlugin {
 	}
 
 	private void define(ListingActionContext ctx, GenesisDefiner.Kind kind) {
-		Program p = ctx.getProgram();
-		ProgramSelection sel = ctx.getSelection();
+		defineRaw(ctx.getProgram(), ctx.getAddress(), ctx.getSelection(), kind, null);
+	}
+
+	/**
+	 * Defines raw data. A selection decides the size; without one the count is asked for, unless repeat
+	 * supplies the count of the earlier define.
+	 */
+	private void defineRaw(Program p, Address cursor, ProgramSelection sel, GenesisDefiner.Kind kind,
+			Integer repeatUnits) {
 		int tx = p.startTransaction("Define Genesis " + kind.label);
 		boolean ok = false;
+		int units = 0;
 		try {
 			if (sel != null && !sel.isEmpty()) {
 				for (AddressRange r : sel.getAddressRanges()) {
-					int units = (int) (r.getLength() / kind.unitBytes);
+					units = (int) (r.getLength() / kind.unitBytes);
 					if (units == 0) {
 						Msg.showError(this, null, "Genesis", "Selection at " + r.getMinAddress() +
 							" is shorter than one of " + kind.unitName + " (" + kind.unitBytes + " bytes).");
@@ -136,13 +250,18 @@ public class GenesisGfxPlugin extends ProgramPlugin {
 					GenesisDefiner.define(p, r.getMinAddress(), units, kind);
 				}
 			}
+			else if (repeatUnits != null) {
+				units = repeatUnits;
+				GenesisDefiner.define(p, cursor, units, kind);
+			}
 			else {
 				NumberInputDialog d = new NumberInputDialog("Define Genesis " + kind.label,
 					"Number of " + kind.unitName + ":", 1, 1, 0x10000, false);
 				if (!d.show()) {
 					return;
 				}
-				GenesisDefiner.define(p, ctx.getAddress(), d.getValue(), kind);
+				units = d.getValue();
+				GenesisDefiner.define(p, cursor, units, kind);
 			}
 			ok = true;
 		}
@@ -153,6 +272,7 @@ public class GenesisGfxPlugin extends ProgramPlugin {
 			p.endTransaction(tx, ok);
 		}
 		if (ok) {
+			remember(p, new LastDefine(kind, null, units));
 			provider.setVisible(true);
 		}
 	}
@@ -164,6 +284,7 @@ public class GenesisGfxPlugin extends ProgramPlugin {
 	@Override
 	protected void programActivated(Program program) {
 		provider.setProgram(program);
+		updateRepeatActions();
 	}
 
 	@Override
