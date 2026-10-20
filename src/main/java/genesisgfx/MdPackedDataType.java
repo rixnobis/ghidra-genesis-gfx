@@ -35,6 +35,12 @@ public abstract class MdPackedDataType extends BuiltIn {
 		return getName();
 	}
 
+	/** Without this Ghidra labels arrays of packed bytes null_ARRAY_<addr>. */
+	@Override
+	public String getDefaultLabelPrefix() {
+		return getName().toUpperCase();
+	}
+
 	@Override
 	protected SettingsDefinition[] getBuiltInSettingsDefinitions() {
 		return new SettingsDefinition[] { GenesisCodecSetting.DEF };
