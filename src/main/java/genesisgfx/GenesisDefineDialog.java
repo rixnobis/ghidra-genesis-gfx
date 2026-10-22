@@ -17,7 +17,7 @@ import ghidra.program.model.listing.Program;
 import ghidra.util.MessageType;
 
 /**
- * Start address and count for a raw define. Both fields take expressions as Navigation > Go To does
+ * Count for a raw define at the cursor. The field takes expressions as Navigation > Go To does
  * (symbol names, {@code label+0x20}, {@code 0x200*4}). Invalid input is reported in the dialog, which
  * stays open.
  */
@@ -30,7 +30,7 @@ public class GenesisDefineDialog extends DialogComponentProvider {
 
 	private final Program program;
 	private final GenesisDefiner.Kind kind;
-	private final JTextField address = new JTextField(24);
+	private final Address start;
 	private final JTextField count = new JTextField(24);
 	private Request result;
 
@@ -38,22 +38,11 @@ public class GenesisDefineDialog extends DialogComponentProvider {
 		super("Define Genesis " + kind.label, true, true, true, false);
 		this.program = program;
 		this.kind = kind;
-		address.setName("Start address");
+		this.start = cursor;
 		count.setName("Count");
-		address.setText(cursor == null ? "" : cursor.toString());
 		count.setText(Integer.toString(initialUnits));
 		JPanel p = new JPanel(new GridBagLayout());
-		addRow(p, 0, "Start address:", address);
-		addRow(p, 1, "Number of " + kind.unitName + ":", count);
-		GridBagConstraints gc = new GridBagConstraints();
-		gc.gridx = 0;
-		gc.gridy = 2;
-		gc.gridwidth = 2;
-		gc.anchor = GridBagConstraints.WEST;
-		gc.insets = new Insets(6, 4, 2, 4);
-		p.add(new JLabel("<html>Expressions as in Go To: <tt>level_tiles+0x20</tt>, <tt>0x200*4</tt>, " +
-			"<tt>(end-start)/" + kind.unitBytes + "</tt>.<br>Address numbers are hex, counts decimal (0x for hex)."),
-			gc);
+		addRow(p, 0, "Number of " + kind.unitName + ":", count);
 		addWorkPanel(p);
 		addOKButton();
 		addCancelButton();
@@ -74,9 +63,7 @@ public class GenesisDefineDialog extends DialogComponentProvider {
 				preview();
 			}
 		};
-		address.getDocument().addDocumentListener(live);
 		count.getDocument().addDocumentListener(live);
-		address.addActionListener(e -> okCallback());
 		count.addActionListener(e -> okCallback());
 		preview();
 	}
@@ -108,6 +95,15 @@ public class GenesisDefineDialog extends DialogComponentProvider {
 		catch (ExpressionException e) {
 			throw new ExpressionException("Start address: " + e.getMessage());
 		}
+		return evaluate(program, kind, start, countText);
+	}
+
+	/** As above, with the start already known (the cursor). */
+	public static Request evaluate(Program program, GenesisDefiner.Kind kind, Address start, String countText)
+			throws ExpressionException {
+		if (start == null) {
+			throw new ExpressionException("No cursor address");
+		}
 		long n;
 		try {
 			n = GenesisExpr.number(program, countText);
@@ -136,7 +132,7 @@ public class GenesisDefineDialog extends DialogComponentProvider {
 
 	private Request tryEvaluate() {
 		try {
-			Request r = evaluate(program, kind, address.getText(), count.getText());
+			Request r = evaluate(program, kind, start, count.getText());
 			setStatusText(String.format("%d %s at %s..%s (%d bytes)", r.units(), kind.unitName, r.start(),
 				r.start().add((long) r.units() * kind.unitBytes - 1), (long) r.units() * kind.unitBytes));
 			return r;

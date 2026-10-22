@@ -7,10 +7,9 @@ Ghidra extension for Mega Drive / Genesis graphics. Select bytes in the listing,
 - **VRAM tiles**: `md_tile_4bpp[n]`, 8x8 at 4 bpp, 32 bytes per tile
 - **Tilemap**: `md_tilemap_entry[n]`, priority, palette line, vflip, hflip, 11-bit tile index
 
-With no selection you are asked for a start address (the cursor) and a count. Both fields take
-expressions as Navigation > Go To does: `level_tiles+0x20`, `0x200*4`, `(end-start)/32`, any label or
-block name (addresses are hex, counts decimal unless `0x`). Invalid input is reported in the dialog,
-which stays open. Each element shows its decoded value in the listing.
+With no selection you are asked for a count, and the data is defined at the cursor. The count takes
+expressions as Navigation > Go To does: `0x200/32`, `(end-start)/32`, any label or block name (decimal
+unless `0x`). Invalid input is reported in the dialog, which stays open. Each element shows its decoded value in the listing.
 
 The **Genesis Graphics** window (Window menu) previews what is defined. Tiles mode draws a tile set
 with any defined palette line as CRAM. Tilemap mode draws a tilemap with a defined tile set as VRAM
