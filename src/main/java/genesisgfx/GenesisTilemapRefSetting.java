@@ -1,41 +1,36 @@
 package genesisgfx;
 
-import java.util.ArrayList;
-import java.util.List;
+import java.math.BigInteger;
 
+import ghidra.docking.settings.NumberSettingsDefinition;
 import ghidra.docking.settings.Settings;
-import ghidra.docking.settings.StringSettingsDefinition;
 import ghidra.program.model.address.Address;
 import ghidra.program.model.address.AddressFactory;
 import ghidra.program.model.listing.Data;
-import ghidra.program.model.listing.Program;
 
 /**
  * The address of another defined item (the tile set or palette a tilemap renders with), saved with
  * the tilemap's data as text ("ram:00000400"). Absent means "not set". Whether an item still exists
  * there is the reader's business: see {@link GenesisGfxCatalog}.
  * <p>
- * A string setting, so Data &gt; Settings... shows an editable field: the drop-down suggests every
- * defined item of the right kind, and anything typed is read as a Go To expression (a label name works).
+ * Seen by Ghidra as a number setting (a hex offset in the default address space, 0 = not set), because
+ * that is a kind Data &gt; Settings... both edits and applies: Ghidra 12.1.2's data settings dialog
+ * renders string settings but throws on applying them, and does not render other kinds at all.
  */
-public class GenesisTilemapRefSetting implements StringSettingsDefinition {
+public class GenesisTilemapRefSetting implements NumberSettingsDefinition {
 	public static final GenesisTilemapRefSetting TILES = new GenesisTilemapRefSetting("genesis_tilemap_tiles",
-		"Tiles (address)", "Address of the tile set this tilemap is drawn with (a label or expression works)",
-		true);
+		"Tiles (address)", "Address of the tile set this tilemap is drawn with; 0 means not set");
 	public static final GenesisTilemapRefSetting PALETTE = new GenesisTilemapRefSetting("genesis_tilemap_palette",
-		"Palette (address)", "Address of the palette this tilemap is drawn with (a label or expression works)",
-		false);
+		"Palette (address)", "Address of the palette this tilemap is drawn with; 0 means not set");
 
 	private final String key;
 	private final String name;
 	private final String description;
-	private final boolean tiles;
 
-	private GenesisTilemapRefSetting(String key, String name, String description, boolean tiles) {
+	private GenesisTilemapRefSetting(String key, String name, String description) {
 		this.key = key;
 		this.name = name;
 		this.description = description;
-		this.tiles = tiles;
 	}
 
 	/** The stored text, null when unset. */
@@ -50,24 +45,17 @@ public class GenesisTilemapRefSetting implements StringSettingsDefinition {
 			return null;
 		}
 		try {
-			return factory.getAddress(s);
+			Address a = factory.getAddress(s);
+			if (a != null) {
+				return a;
+			}
 		}
 		catch (Exception e) {
-			return null;
+			// fall through to the plain offset
 		}
-	}
-
-	/**
-	 * The stored address, also when the text is a label or an expression typed in Data &gt; Settings;
-	 * null when unset or not an address in this program.
-	 */
-	public Address getRef(Settings settings, Program program) {
-		Address a = getRef(settings, program == null ? null : program.getAddressFactory());
-		if (a != null || program == null || getText(settings) == null) {
-			return a;
-		}
+		long off = offsetOf(s);
 		try {
-			return GenesisExpr.address(program, getText(settings));
+			return off <= 0 ? null : factory.getDefaultAddressSpace().getAddress(off);
 		}
 		catch (Exception e) {
 			return null;
@@ -84,39 +72,68 @@ public class GenesisTilemapRefSetting implements StringSettingsDefinition {
 		}
 	}
 
-	@Override
-	public String getValue(Settings settings) {
-		return getText(settings);
+	/** The offset in stored text "space:0000abcd", "0xabcd" or "abcd" (hex); 0 when there is none. */
+	private static long offsetOf(String s) {
+		if (s == null) {
+			return 0;
+		}
+		String t = s.trim();
+		int colon = t.lastIndexOf(':');
+		if (colon >= 0) {
+			t = t.substring(colon + 1);
+		}
+		if (t.startsWith("0x") || t.startsWith("0X")) {
+			t = t.substring(2);
+		}
+		try {
+			return Long.parseUnsignedLong(t, 16);
+		}
+		catch (NumberFormatException e) {
+			return 0;
+		}
 	}
 
-	/** Stores what was typed (trimmed); blank clears. */
 	@Override
-	public void setValue(Settings settings, String value) {
-		if (value == null || value.isBlank()) {
+	public long getValue(Settings settings) {
+		return offsetOf(getText(settings));
+	}
+
+	/**
+	 * Stores an offset: on a program's data as an address in its default space ("ram:00000400"); on the
+	 * dialog's scratch settings, which have no program, as "0x400" until the dialog applies it to the data.
+	 * 0 clears.
+	 */
+	@Override
+	public void setValue(Settings settings, long value) {
+		if (value <= 0) {
 			settings.clearSetting(key);
+			return;
 		}
-		else {
-			settings.setString(key, value.trim());
+		if (settings instanceof Data d && d.getProgram() != null) {
+			try {
+				setRef(settings, d.getProgram().getAddressFactory().getDefaultAddressSpace().getAddress(value));
+				return;
+			}
+			catch (Exception e) {
+				// out of the space: keep the number, getRef will report nothing usable
+			}
 		}
+		settings.setString(key, "0x" + Long.toHexString(value));
 	}
 
 	@Override
-	public boolean supportsSuggestedValues() {
+	public BigInteger getMaxValue() {
+		return BigInteger.valueOf(0xFFFFFFFFL);
+	}
+
+	@Override
+	public boolean allowNegativeValue() {
+		return false;
+	}
+
+	@Override
+	public boolean isHexModePreferred() {
 		return true;
-	}
-
-	/** Addresses of every defined tile set (or palette) in the program, when the settings are a Data's. */
-	@Override
-	public String[] getSuggestedValues(Settings settings) {
-		if (!(settings instanceof Data d) || d.getProgram() == null) {
-			return null;
-		}
-		GenesisGfxCatalog c = GenesisGfxCatalog.scan(d.getProgram());
-		List<String> out = new ArrayList<>();
-		for (GenesisGfxCatalog.Item i : tiles ? c.tileSets : c.palettes) {
-			out.add(i.address.toString(true));
-		}
-		return out.toArray(String[]::new);
 	}
 
 	@Override
@@ -163,8 +180,6 @@ public class GenesisTilemapRefSetting implements StringSettingsDefinition {
 
 	@Override
 	public boolean hasSameValue(Settings a, Settings b) {
-		String x = getText(a);
-		String y = getText(b);
-		return x == null ? y == null : x.equals(y);
+		return getValue(a) == getValue(b);
 	}
 }

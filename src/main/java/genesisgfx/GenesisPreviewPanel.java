@@ -408,12 +408,6 @@ public class GenesisPreviewPanel extends JPanel {
 		boolean wasApplying = applying;
 		applying = true;
 		try {
-			if (m.tilesRef == null && m.tilesRefText != null) {
-				warn("stored tile set \"" + m.tilesRefText + "\" is not an address; using the selected tiles");
-			}
-			if (m.paletteRef == null && m.paletteRefText != null) {
-				warn("stored palette \"" + m.paletteRefText + "\" is not an address; using the selected lines");
-			}
 			if (m.tilesRef != null) {
 				Item t = catalog.storedTiles(m);
 				if (t == null) {
