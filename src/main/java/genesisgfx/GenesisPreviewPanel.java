@@ -6,9 +6,6 @@ import java.awt.Color;
 import java.awt.Dimension;
 import java.awt.Graphics;
 import java.awt.Graphics2D;
-import java.awt.GridBagConstraints;
-import java.awt.GridBagLayout;
-import java.awt.Insets;
 import java.awt.RenderingHints;
 import java.awt.event.MouseEvent;
 import java.awt.event.MouseMotionAdapter;
@@ -114,22 +111,25 @@ public class GenesisPreviewPanel extends JPanel {
 			@Override
 			public void componentResized(java.awt.event.ComponentEvent e) {
 				modeRow.revalidate();
+				cards.revalidate();
+				for (java.awt.Component card : cards.getComponents()) {
+					for (java.awt.Component row : ((java.awt.Container) card).getComponents()) {
+						row.invalidate();
+					}
+				}
+				top.revalidate();
 			}
 		});
 
 		JPanel tilesCard = new JPanel();
 		tilesCard.setLayout(new BoxLayout(tilesCard, BoxLayout.Y_AXIS));
-		tilesCard.add(row(new JLabel("Tiles"), tileSet, new JLabel("Per row"), perRow));
-		tilesCard.add(row(new JLabel("Palette (CRAM)"), tileLine));
+		tilesCard.add(new PairFlow(this, 3, "Tiles", tileSet, "Per row", perRow, "Palette (CRAM)", tileLine));
 
 		JPanel mapCard = new JPanel();
 		mapCard.setLayout(new BoxLayout(mapCard, BoxLayout.Y_AXIS));
-		mapCard.add(row(new JLabel("Tilemap"), tilemap, new JLabel("Width"), mapWidth, new JLabel("Priority"),
-			priority));
-		mapCard.add(row(new JLabel("Tiles (VRAM)"), vram, new JLabel("First tile index"), baseTile));
-		mapCard.add(grid(new JComponent[][] {
-			{ new JLabel("Line 0"), cram[0], new JLabel("Line 1"), cram[1] },
-			{ new JLabel("Line 2"), cram[2], new JLabel("Line 3"), cram[3] } }));
+		mapCard.add(new PairFlow(this, 3, "Tilemap", tilemap, "Width", mapWidth, "Priority", priority));
+		mapCard.add(new PairFlow(this, 2, "Tiles (VRAM)", vram, "First tile index", baseTile));
+		mapCard.add(new PairFlow(this, 2, "Line 0", cram[0], "Line 1", cram[1], "Line 2", cram[2], "Line 3", cram[3]));
 
 		cards.setAlignmentX(LEFT_ALIGNMENT);
 		cards.add(tilesCard, MODE_TILES);
@@ -250,61 +250,19 @@ public class GenesisPreviewPanel extends JPanel {
 
 	/** Client property marking the combo boxes that list long item text and may stretch or shrink. */
 	private static final String STRETCH = "genesisgfx.stretch";
+	/** Client property: the width a stretchy control wants at least before its pair wraps (Integer). */
+	private static final String MIN_WIDTH = "genesisgfx.minWidth";
 
-	/** Narrowest a stretchy combo box may get; longer item text is cut with an ellipsis (full text in the tooltip). */
-	private static final int COMBO_MIN_WIDTH = 90;
-
-	/**
-	 * One row of controls. Labels, spinners, check boxes and short combo boxes keep their preferred size; the
-	 * item and palette combo boxes share whatever width is left and may shrink down to
-	 * {@link #COMBO_MIN_WIDTH}, so nothing is ever pushed out of view.
-	 */
-	private static JPanel row(JComponent... comps) {
-		return grid(new JComponent[][] { comps });
+	private static boolean isStretchy(java.awt.Component c) {
+		return c instanceof JComponent j && Boolean.TRUE.equals(j.getClientProperty(STRETCH));
 	}
 
-	private static boolean isStretchy(JComponent c) {
-		return Boolean.TRUE.equals(c.getClientProperty(STRETCH));
-	}
-
-	/** Rows of controls on one shared column grid (combo columns stretch, the rest stay compact). */
-	private static JPanel grid(JComponent[][] rows) {
-		JPanel p = new JPanel(new GridBagLayout());
-		boolean stretch = false;
-		int cols = 0;
-		for (JComponent[] r : rows) {
-			cols = Math.max(cols, r.length);
-			for (JComponent c : r) {
-				stretch |= isStretchy(c);
-			}
-		}
-		for (int y = 0; y < rows.length; y++) {
-			for (int x = 0; x < rows[y].length; x++) {
-				JComponent c = rows[y][x];
-				GridBagConstraints gc = new GridBagConstraints();
-				gc.gridx = x;
-				gc.gridy = y;
-				gc.insets = new Insets(2, 3, 2, 3);
-				gc.anchor = GridBagConstraints.WEST;
-				if (isStretchy(c)) {
-					Dimension d = c.getPreferredSize();
-					c.setMinimumSize(new Dimension(COMBO_MIN_WIDTH, d.height));
-					gc.weightx = 1;
-					gc.fill = GridBagConstraints.HORIZONTAL;
-				}
-				p.add(c, gc);
-			}
-		}
-		if (!stretch) {
-			GridBagConstraints gc = new GridBagConstraints();
-			gc.gridx = cols;
-			gc.weightx = 1;
-			p.add(new JPanel(), gc);
-		}
-		p.setAlignmentX(LEFT_ALIGNMENT);
-		p.setMaximumSize(new Dimension(Integer.MAX_VALUE, p.getPreferredSize().height));
-		return p;
-	}
+	/** Narrowest an item combo box should get before its label pair moves to a row of its own. */
+	private static final int ITEM_MIN_WIDTH = 160;
+	/** Same for a palette line combo box (the swatch alone is 96 px). */
+	private static final int LINE_MIN_WIDTH = 120;
+	/** No control is squeezed below this, however narrow the window. */
+	private static final int HARD_MIN_WIDTH = 24;
 
 	private static JComboBox<Item> itemCombo(String unit, int unitBytes) {
 		JComboBox<Item> c = new JComboBox<>() {
@@ -340,6 +298,7 @@ public class GenesisPreviewPanel extends JPanel {
 		};
 		ToolTipManager.sharedInstance().registerComponent(c);
 		c.putClientProperty(STRETCH, Boolean.TRUE);
+		c.putClientProperty(MIN_WIDTH, LINE_MIN_WIDTH);
 		c.setRenderer(new DefaultListCellRenderer() {
 			@Override
 			public java.awt.Component getListCellRendererComponent(JList<?> list, Object value, int index,
@@ -823,6 +782,149 @@ public class GenesisPreviewPanel extends JPanel {
 			String where = m.isCompressed() ? String.format("%s+%X (%s)", a, cell * 2, m.codec) : a.toString();
 			status.setText(String.format("cell (%d,%d) @ %s  %04X  %s", cell % renderedWidthCells,
 				cell / renderedWidthCells, where, e, GenesisGfx.describeEntry(e)));
+		}
+	}
+
+	/**
+	 * Label/control pairs packed into as few rows as fit the preview's width, at most maxPerRow per row.
+	 * A pair moves to the next row rather than squeezing a combo box below its minimum; whatever width a
+	 * row has left goes to its combo boxes (stretchy controls), so they grow with the window. A pair alone
+	 * on a row always gets the whole width, so nothing ever disappears: at worst a combo box shows its
+	 * text cut with an ellipsis (the full text is in its tooltip).
+	 */
+	static class PairFlow extends JPanel {
+		private static final int HGAP = 6, VGAP = 2, LABEL_GAP = 4, MARGIN = 4;
+		private final JComponent owner;
+		private final int maxPerRow;
+		private final List<JLabel> labels = new java.util.ArrayList<>();
+		private final List<JComponent> controls = new java.util.ArrayList<>();
+
+		PairFlow(JComponent owner, int maxPerRow, Object... labelControl) {
+			super(null);
+			this.owner = owner;
+			this.maxPerRow = maxPerRow;
+			for (int i = 0; i < labelControl.length; i += 2) {
+				JLabel l = new JLabel((String) labelControl[i]);
+				JComponent c = (JComponent) labelControl[i + 1];
+				l.setLabelFor(c);
+				labels.add(l);
+				controls.add(c);
+				add(l);
+				add(c);
+			}
+			setAlignmentX(LEFT_ALIGNMENT);
+		}
+
+		/** Preferred width of the control, except that a stretchy one only claims its minimum here. */
+		private int want(JComponent c) {
+			if (!isStretchy(c)) {
+				return c.getPreferredSize().width;
+			}
+			Object m = c.getClientProperty(MIN_WIDTH);
+			int min = m instanceof Integer i ? i : ITEM_MIN_WIDTH;
+			return Math.min(min, c.getPreferredSize().width);
+		}
+
+		private int pairWidth(int i) {
+			return labels.get(i).getPreferredSize().width + LABEL_GAP + want(controls.get(i));
+		}
+
+		/** Pair indices per row for the given width. */
+		private List<int[]> rows(int width) {
+			List<int[]> out = new java.util.ArrayList<>();
+			int avail = width - 2 * MARGIN;
+			int i = 0;
+			while (i < labels.size()) {
+				int start = i, used = pairWidth(i);
+				i++;
+				while (i < labels.size() && i - start < maxPerRow && used + HGAP + pairWidth(i) <= avail) {
+					used += HGAP + pairWidth(i);
+					i++;
+				}
+				out.add(new int[] { start, i });
+			}
+			return out;
+		}
+
+		private int rowHeight(int[] r) {
+			int h = 0;
+			for (int i = r[0]; i < r[1]; i++) {
+				h = Math.max(h, Math.max(labels.get(i).getPreferredSize().height,
+					controls.get(i).getPreferredSize().height));
+			}
+			return h;
+		}
+
+		private int width() {
+			int w = getWidth() > 0 ? getWidth() : owner.getWidth();
+			return w > 0 ? w : Integer.MAX_VALUE / 4;
+		}
+
+		@Override
+		public Dimension getPreferredSize() {
+			int w = owner.getWidth() > 0 ? owner.getWidth() : Integer.MAX_VALUE / 4;
+			int h = VGAP, widest = 0;
+			for (int[] r : rows(w)) {
+				h += rowHeight(r) + VGAP;
+				int rw = 2 * MARGIN;
+				for (int i = r[0]; i < r[1]; i++) {
+					rw += (i > r[0] ? HGAP : 0) + labels.get(i).getPreferredSize().width + LABEL_GAP +
+						controls.get(i).getPreferredSize().width;
+				}
+				widest = Math.max(widest, rw);
+			}
+			return new Dimension(Math.min(widest, w), h);
+		}
+
+		@Override
+		public Dimension getMinimumSize() {
+			return new Dimension(0, getPreferredSize().height);
+		}
+
+		@Override
+		public Dimension getMaximumSize() {
+			return new Dimension(Integer.MAX_VALUE, getPreferredSize().height);
+		}
+
+		@Override
+		public void doLayout() {
+			int w = width();
+			int y = VGAP;
+			for (int[] r : rows(w)) {
+				int h = rowHeight(r);
+				int used = 0, stretchy = 0;
+				for (int i = r[0]; i < r[1]; i++) {
+					used += (i > r[0] ? HGAP : 0) + labels.get(i).getPreferredSize().width + LABEL_GAP;
+					JComponent c = controls.get(i);
+					used += isStretchy(c) ? want(c) : c.getPreferredSize().width;
+					stretchy += isStretchy(c) ? 1 : 0;
+				}
+				int extra = w - 2 * MARGIN - used;
+				int x = MARGIN;
+				for (int i = r[0]; i < r[1]; i++) {
+					JLabel l = labels.get(i);
+					JComponent c = controls.get(i);
+					Dimension ld = l.getPreferredSize();
+					l.setBounds(x, y + (h - ld.height) / 2, ld.width, ld.height);
+					x += ld.width + LABEL_GAP;
+					int cw = isStretchy(c) ? want(c) : c.getPreferredSize().width;
+					if (stretchy > 0 && isStretchy(c)) {
+						cw += extra / stretchy;
+					}
+					else if (stretchy == 0 && extra < 0 && i == r[1] - 1) {
+						cw += extra; // a fixed control alone and too wide: let it shrink
+					}
+					int last = r[1] - 1;
+					if (i == last) {
+						cw = Math.min(cw, w - MARGIN - x); // never past the right edge
+					}
+					cw = Math.max(cw, HARD_MIN_WIDTH);
+					int ch = c.getPreferredSize().height;
+					c.setBounds(x, y + (h - ch) / 2, cw, ch);
+					x += cw + HGAP;
+				}
+				y += h + VGAP;
+			}
 		}
 	}
 
