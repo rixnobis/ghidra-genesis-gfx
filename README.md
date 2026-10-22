@@ -47,8 +47,7 @@ Options > Key Bindings.
 
 How a tilemap is drawn is saved with it, as data settings (**Data > Settings**, on both
 `md_tilemap_entry[n]` and `md_tilemap_packed[n]`): "Width (cells)", "Tiles (address)", "First tile
-index" and "Palette (address)", all four editable there (the address fields suggest the defined tile sets
-or palettes and also take a label or expression). When they are set the preview uses them instead of guessing or keeping
+index" and "Palette (address)", all four editable there (the two addresses as hex numbers, 0 = not set). When they are set the preview uses them instead of guessing or keeping
 the last selection, and changing the Width spinner, the Tiles (VRAM) combo, the First tile index spinner
 or the palette lines writes them back (one undoable change each). The palette setting is the palette
 definition that line 0 was taken from; its lines 0-3 are used. A stored address that no longer holds a
