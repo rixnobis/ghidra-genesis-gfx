@@ -23,7 +23,7 @@ H="$W/ghidra/support/analyzeHeadless"
 	tiles:0x400:8:level_tiles tilemap:0x1000:128:level_map > "$W/run1.log" 2>&1
 "$H" "$W/proj" t -process rom.bin -noanalysis -postScript GenesisGfxExport.java "$W/out2" width=16 \
 	> "$W/run2.log" 2>&1
-"$H" "$W/proj" t -process rom.bin -noanalysis -scriptPath "$PWD/src/test/headless" \
+"$H" "$W/proj" t -process rom.bin -noanalysis -readOnly -scriptPath "$PWD/src/test/headless" \
 	-postScript GenesisPanelFollowTest.java > "$W/run3.log" 2>&1
 grep -E 'PASS |FAIL |RESULT' "$W/run3.log" | sed 's/.*> //; s/ (GhidraScript).*//'
 grep -q 'RESULT PASS' "$W/run3.log"

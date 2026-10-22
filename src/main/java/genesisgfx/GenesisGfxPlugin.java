@@ -10,11 +10,8 @@ import java.util.WeakHashMap;
 
 import javax.swing.KeyStroke;
 
-import docking.ActionContext;
-import docking.action.DockingAction;
 import docking.action.KeyBindingData;
 import docking.action.MenuData;
-import docking.action.ToolBarData;
 import docking.widgets.dialogs.InputWithChoicesDialog;
 import ghidra.MiscellaneousPluginPackage;
 import ghidra.app.context.ListingActionContext;
@@ -31,7 +28,6 @@ import ghidra.program.model.listing.Program;
 import ghidra.program.util.ProgramLocation;
 import ghidra.program.util.ProgramSelection;
 import ghidra.util.Msg;
-import resources.Icons;
 
 //@formatter:off
 @PluginInfo(
@@ -108,7 +104,6 @@ public class GenesisGfxPlugin extends ProgramPlugin {
 	/** Last define per open program, so another program does not inherit it. */
 	private final Map<Program, LastDefine> lastDefine = new WeakHashMap<>();
 	private ListingContextAction repeatAction;
-	private DockingAction repeatPreviewAction;
 
 	private void addRepeatActions() {
 		repeatAction = new ListingContextAction("Repeat Last Genesis Define", getName()) {
@@ -128,19 +123,6 @@ public class GenesisGfxPlugin extends ProgramPlugin {
 		repeatAction.setPopupMenuData(new MenuData(new String[] { MENU, "Repeat last define" }, null, MENU,
 			MenuData.NO_MNEMONIC, "05"));
 		tool.addAction(repeatAction);
-
-		repeatPreviewAction = new DockingAction("Repeat Last Genesis Define (preview)", getName()) {
-			@Override
-			public void actionPerformed(ActionContext context) {
-				if (currentProgram != null && currentLocation != null) {
-					repeatLast(currentProgram, currentLocation.getAddress(), currentSelection);
-				}
-			}
-		};
-		repeatPreviewAction.setToolBarData(new ToolBarData(Icons.REFRESH_ICON, "Genesis"));
-		repeatPreviewAction.setDescription(REPEAT_NOTHING);
-		repeatPreviewAction.setEnabled(false);
-		provider.addLocalAction(repeatPreviewAction);
 	}
 
 	/** Remembers a define and tells the actions what they would repeat. */
@@ -159,8 +141,6 @@ public class GenesisGfxPlugin extends ProgramPlugin {
 		repeatAction.setPopupMenuData(new MenuData(
 			new String[] { MENU, l == null ? "Repeat last define" : "Repeat last define (" + l.describe() + ")" },
 			null, MENU, MenuData.NO_MNEMONIC, "05"));
-		repeatPreviewAction.setDescription(text);
-		repeatPreviewAction.setEnabled(l != null);
 	}
 
 	/** Defines the same kind, with the same codec or count, at the cursor (or selection). */
@@ -286,6 +266,17 @@ public class GenesisGfxPlugin extends ProgramPlugin {
 				goTo(start);
 			}
 		}
+	}
+
+	/** The Listing's selection start, or its cursor when nothing is selected; null without a program. */
+	Address listingAddress() {
+		if (currentProgram == null) {
+			return null;
+		}
+		if (currentSelection != null && !currentSelection.isEmpty()) {
+			return currentSelection.getMinAddress();
+		}
+		return currentLocation == null ? null : currentLocation.getAddress();
 	}
 
 	void navigate(ghidra.program.model.address.Address a) {

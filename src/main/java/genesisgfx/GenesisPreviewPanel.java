@@ -580,11 +580,9 @@ public class GenesisPreviewPanel extends JPanel {
 	public void follow(Address a) {
 		Item t = GenesisGfxCatalog.find(catalog.tileSets, a);
 		if (t != null) {
+			// Only the Tiles view follows. The tilemap keeps its tile set until "Apply to tilemap".
 			if (!Objects.equals(tileSet.getSelectedItem(), t)) {
 				tileSet.setSelectedItem(t);
-			}
-			if (MODE_TILEMAP.equals(mode.getSelectedItem())) {
-				vram.setSelectedItem(t);
 			}
 			return;
 		}
@@ -598,6 +596,137 @@ public class GenesisPreviewPanel extends JPanel {
 		if (l != null && MODE_TILES.equals(mode.getSelectedItem())) {
 			tileLine.setSelectedItem(l);
 		}
+	}
+
+	/** The tilemap selected in the preview, null when none. */
+	public Item selectedTilemap() {
+		return (Item) tilemap.getSelectedItem();
+	}
+
+	/** The tile set selected for the tilemap (the Tiles (VRAM) combo), null when none. */
+	public Item selectedVram() {
+		return (Item) vram.getSelectedItem();
+	}
+
+	/** The palette line selected for a CRAM line 0-3, null when none. */
+	public PaletteLine selectedCram(int line) {
+		return (PaletteLine) cram[line].getSelectedItem();
+	}
+
+	/**
+	 * Where the current tilemap's tile set is: the stored reference when it names a defined tile set,
+	 * otherwise the Tiles (VRAM) selection. Null when there is neither.
+	 */
+	public Item tilesInUse() {
+		Item m = selectedTilemap();
+		Item t = m == null ? null : catalog.storedTiles(m);
+		return t != null ? t : selectedVram();
+	}
+
+	/**
+	 * The palette the current tilemap uses: the stored reference when it names a defined palette,
+	 * otherwise the palette CRAM line 0 (or the first set line) comes from. Null when there is neither.
+	 */
+	public Item paletteInUse() {
+		Item m = selectedTilemap();
+		Item p = m == null ? null : catalog.storedPalette(m);
+		if (p != null) {
+			return p;
+		}
+		for (JComboBox<PaletteLine> c : cram) {
+			PaletteLine l = (PaletteLine) c.getSelectedItem();
+			if (l != null) {
+				return l.source;
+			}
+		}
+		return null;
+	}
+
+	/**
+	 * Makes the tile set the current tilemap's, in the preview and through the sink (stored with the
+	 * tilemap). Returns why not, or null when done.
+	 */
+	public String applyTiles(Item t) {
+		Item m = selectedTilemap();
+		if (m == null) {
+			return "No tilemap selected in the preview";
+		}
+		if (t == null) {
+			return "No tile set";
+		}
+		boolean was = applying;
+		applying = true;
+		try {
+			vram.setSelectedItem(t);
+		}
+		finally {
+			applying = was;
+		}
+		if (sink != null) {
+			sink.tiles(m.address, t.address);
+		}
+		refresh();
+		return null;
+	}
+
+	/**
+	 * Puts a palette line into one CRAM line (0-3) of the current tilemap. What is stored with the tilemap is
+	 * one palette item, the one CRAM line 0 comes from, as when the user picks the line in the combo box.
+	 */
+	public String applyPaletteLine(PaletteLine l, int cramLine) {
+		Item m = selectedTilemap();
+		if (m == null) {
+			return "No tilemap selected in the preview";
+		}
+		if (l == null || cramLine < 0 || cramLine > 3) {
+			return "No palette line";
+		}
+		boolean was = applying;
+		applying = true;
+		try {
+			cram[cramLine].setSelectedItem(l);
+		}
+		finally {
+			applying = was;
+		}
+		PaletteLine first = (PaletteLine) cram[0].getSelectedItem();
+		if (sink != null) {
+			sink.palette(m.address, first == null ? null : first.source.address);
+		}
+		refresh();
+		return null;
+	}
+
+	/** Lines 0-3 of the palette item become CRAM lines 0-3 of the current tilemap (stored with it). */
+	public String applyPalette(Item p) {
+		Item m = selectedTilemap();
+		if (m == null) {
+			return "No tilemap selected in the preview";
+		}
+		if (p == null) {
+			return "No palette";
+		}
+		boolean was = applying;
+		applying = true;
+		try {
+			for (int i = 0; i < 4; i++) {
+				PaletteLine pick = null;
+				for (PaletteLine l : catalog.lines) {
+					if (l.source.address.equals(p.address) && l.line == i) {
+						pick = l;
+					}
+				}
+				cram[i].setSelectedItem(pick);
+			}
+		}
+		finally {
+			applying = was;
+		}
+		if (sink != null) {
+			sink.palette(m.address, p.address);
+		}
+		refresh();
+		return null;
 	}
 
 	private int[] lineOf(JComboBox<PaletteLine> c) {
