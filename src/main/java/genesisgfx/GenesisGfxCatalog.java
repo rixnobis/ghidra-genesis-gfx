@@ -37,6 +37,9 @@ public class GenesisGfxCatalog {
 		/** Stored tile set / palette addresses, null when unset. They may point at nothing: check the catalog. */
 		public Address tilesRef;
 		public Address paletteRef;
+		/** The stored texts as typed, null when unset; set but not an address when the matching ref is null. */
+		public String tilesRefText;
+		public String paletteRefText;
 
 		Item(Address address, String name, int length, byte[] bytes) {
 			this(address, name, length, bytes, null, 0, null);
@@ -167,8 +170,10 @@ public class GenesisGfxCatalog {
 		Item item = decodeBytes(program, d, label, codecName, width);
 		if (item != null) {
 			item.baseTile = GenesisTilemapBaseSetting.DEF.getBase(d);
-			item.tilesRef = GenesisTilemapRefSetting.TILES.getRef(d, program.getAddressFactory());
-			item.paletteRef = GenesisTilemapRefSetting.PALETTE.getRef(d, program.getAddressFactory());
+			item.tilesRef = GenesisTilemapRefSetting.TILES.getRef(d, program);
+			item.paletteRef = GenesisTilemapRefSetting.PALETTE.getRef(d, program);
+			item.tilesRefText = GenesisTilemapRefSetting.TILES.getText(d);
+			item.paletteRefText = GenesisTilemapRefSetting.PALETTE.getText(d);
 		}
 		return item;
 	}
