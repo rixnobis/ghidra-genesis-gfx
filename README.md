@@ -7,14 +7,23 @@ Ghidra extension for Mega Drive / Genesis graphics. Select bytes in the listing,
 - **VRAM tiles**: `md_tile_4bpp[n]`, 8x8 at 4 bpp, 32 bytes per tile
 - **Tilemap**: `md_tilemap_entry[n]`, priority, palette line, vflip, hflip, 11-bit tile index
 
-With no selection you are asked for a count at the cursor. Each element shows its decoded value in
-the listing.
+With no selection you are asked for a start address (the cursor) and a count. Both fields take
+expressions as Navigation > Go To does: `level_tiles+0x20`, `0x200*4`, `(end-start)/32`, any label or
+block name (addresses are hex, counts decimal unless `0x`). Invalid input is reported in the dialog,
+which stays open. Each element shows its decoded value in the listing.
 
 The **Genesis Graphics** window (Window menu) previews what is defined. Tiles mode draws a tile set
 with any defined palette line as CRAM. Tilemap mode draws a tilemap with a defined tile set as VRAM
 (with an adjustable first tile index) and any four palette lines as CRAM lines 0-3. It can filter by
-priority and show index 0 as transparent. It follows the listing cursor, shows the entry under the
-mouse, and jumps to it on double click.
+priority and show index 0 as transparent. It follows the listing cursor (a tile set or palette under
+the cursor is shown in Tiles mode, but never changes the tilemap), shows the entry under the mouse, and
+jumps to it on double click.
+
+Its toolbar: **Go to tilemap**, **Go to tiles (VRAM)** and **Go to palette (CRAM)** move the Listing to the
+selected tilemap and to the tile set and palette it is drawn with (the stored ones, else the current
+selection). **Apply to tilemap** (Ctrl+Shift+A while the window has focus) makes the tile set or palette at
+the Listing cursor the current tilemap's; for a palette it asks which CRAM line (or all four lines) it
+goes to. It is one undoable change.
 
 ![preview](docs/screenshot.png)
 
@@ -28,7 +37,7 @@ existing definition; the default, `none`, uses the bytes as they are.
 
 ## Repeat last define
 
-**Genesis > Repeat last define** (Ctrl+Shift+Y, or the refresh button in the Genesis Graphics window)
+**Genesis > Repeat last define** (Ctrl+Shift+Y)
 defines the same kind with the same codec, or the same count for raw data, at the cursor, or at the
 selection start. It is remembered per open program and disabled until something has been defined through
 the plugin. Ghidra's own Y (repeat last data type) is unchanged; the key can be rebound under Edit > Tool
@@ -38,7 +47,8 @@ Options > Key Bindings.
 
 How a tilemap is drawn is saved with it, as data settings (**Data > Settings**, on both
 `md_tilemap_entry[n]` and `md_tilemap_packed[n]`): "Width (cells)", "Tiles (address)", "First tile
-index" and "Palette (address)". When they are set the preview uses them instead of guessing or keeping
+index" and "Palette (address)", all four editable there (the address fields suggest the defined tile sets
+or palettes and also take a label or expression). When they are set the preview uses them instead of guessing or keeping
 the last selection, and changing the Width spinner, the Tiles (VRAM) combo, the First tile index spinner
 or the palette lines writes them back (one undoable change each). The palette setting is the palette
 definition that line 0 was taken from; its lines 0-3 are used. A stored address that no longer holds a
