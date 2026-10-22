@@ -16,7 +16,6 @@ import docking.action.KeyBindingData;
 import docking.action.MenuData;
 import docking.action.ToolBarData;
 import docking.widgets.dialogs.InputWithChoicesDialog;
-import docking.widgets.dialogs.NumberInputDialog;
 import ghidra.MiscellaneousPluginPackage;
 import ghidra.app.context.ListingActionContext;
 import ghidra.app.context.ListingContextAction;
@@ -235,11 +234,30 @@ public class GenesisGfxPlugin extends ProgramPlugin {
 	 */
 	private void defineRaw(Program p, Address cursor, ProgramSelection sel, GenesisDefiner.Kind kind,
 			Integer repeatUnits) {
+		Address start = cursor;
+		int units = 0;
+		boolean useSelection = sel != null && !sel.isEmpty();
+		if (!useSelection) {
+			if (repeatUnits != null) {
+				units = repeatUnits;
+			}
+			else {
+				LastDefine l = lastDefine.get(p);
+				GenesisDefineDialog d = new GenesisDefineDialog(p, kind, cursor,
+					l != null && l.kind() == kind && l.codec() == null ? l.units() : 1);
+				tool.showDialog(d);
+				GenesisDefineDialog.Request r = d.getResult();
+				if (r == null) {
+					return;
+				}
+				start = r.start();
+				units = r.units();
+			}
+		}
 		int tx = p.startTransaction("Define Genesis " + kind.label);
 		boolean ok = false;
-		int units = 0;
 		try {
-			if (sel != null && !sel.isEmpty()) {
+			if (useSelection) {
 				for (AddressRange r : sel.getAddressRanges()) {
 					units = (int) (r.getLength() / kind.unitBytes);
 					if (units == 0) {
@@ -250,18 +268,8 @@ public class GenesisGfxPlugin extends ProgramPlugin {
 					GenesisDefiner.define(p, r.getMinAddress(), units, kind);
 				}
 			}
-			else if (repeatUnits != null) {
-				units = repeatUnits;
-				GenesisDefiner.define(p, cursor, units, kind);
-			}
 			else {
-				NumberInputDialog d = new NumberInputDialog("Define Genesis " + kind.label,
-					"Number of " + kind.unitName + ":", 1, 1, 0x10000, false);
-				if (!d.show()) {
-					return;
-				}
-				units = d.getValue();
-				GenesisDefiner.define(p, cursor, units, kind);
+				GenesisDefiner.define(p, start, units, kind);
 			}
 			ok = true;
 		}
@@ -274,6 +282,9 @@ public class GenesisGfxPlugin extends ProgramPlugin {
 		if (ok) {
 			remember(p, new LastDefine(kind, null, units));
 			provider.setVisible(true);
+			if (!useSelection && !start.equals(cursor)) {
+				goTo(start);
+			}
 		}
 	}
 

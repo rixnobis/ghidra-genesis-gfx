@@ -27,6 +27,10 @@ H="$W/ghidra/support/analyzeHeadless"
 	-postScript GenesisPanelFollowTest.java > "$W/run3.log" 2>&1
 grep -E 'PASS |FAIL |RESULT' "$W/run3.log" | sed 's/.*> //; s/ (GhidraScript).*//'
 grep -q 'RESULT PASS' "$W/run3.log"
+"$H" "$W/proj" t -process rom.bin -noanalysis -readOnly -scriptPath "$PWD/src/test/headless" \
+	-postScript GenesisExprTest.java > "$W/expr.log" 2>&1
+grep -E 'PASS |FAIL |RESULT' "$W/expr.log" | sed 's/.*> //; s/ (GhidraScript).*//'
+grep -q 'RESULT PASS' "$W/expr.log"
 python3 src/test/headless/oracle.py "$W/rom.bin" "$W/out1"
 python3 src/test/headless/oracle.py "$W/rom.bin" "$W/out2"
 
